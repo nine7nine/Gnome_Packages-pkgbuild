@@ -24,7 +24,6 @@ groups=(gnome)
 _setting_src="mutter_setting::https://gitlab.gnome.org/lluo/mutter-rounded-setting/uploads/8f8e3f8d39f31e602c2d09884a6c5dd1/main.js"
 
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=4bcd4a6fab169599004444c9025199099562cc28"
-        '2173_rev.patch'
 	'2089.patch'
 	'2091.patch'
 	'2121.patch'
@@ -32,13 +31,11 @@ source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=4bcd4a6fab16959900
 	'1546.patch'
 	'choppy-mouse-168.patch'
         'mr1441.patch'
-        "round_and_blur_41.1.patch"
-        "round_and_blur_41.1_fix1.patch"
-        "round_and_blur_41.1_fix2.patch"
-        "round_and_blur_41.1_fix3.patch"
+        "0001-revert-MR-2173-no-new-gsettings-schema.patch"
+        "0002-Mutter-Rounded-Blur-41.1-patch.patch"
+        "0003-Fix-order-between-animations-and-blur.patch"
         "$_setting_src")
 sha256sums=('SKIP'
-            'bfaadc2a7e70004350798c8b7c1d841eb92e2aa0fb33f277ea8635c110d154e4'
             '7f07bae4b95deb16020b64ea919a29c843dd19f62e8d49b458870cf81dbf8c70'
             '98e2e267e9519636d26173716168965fc1ecb7f791179e753573ad758c6b3849'
             'd9ac0a8d53264eca3c002f239525e4f588d6739d6688226ee7949475d61cbfaa'
@@ -46,10 +43,9 @@ sha256sums=('SKIP'
             '8f731c15622a87f0dbef9da8d6b47b847f26fef8a4bd9c69aef3540867a58b2b'
             'ca8367e0256ed2aa5981cbd88ef660304966e8054e03e7f6d931c5597a332113'
             '73deff06aed1918632456ca94bc667aa97c18cadd2420fde5b27b0bbae09db26'
-            '7eeddcc0a5cd3d0505b90833ada350479fa1f67d8a02a9451b2c560848a60893'
-            '766a1a91cfa93a7aded4a417e7092c50198c376ec4f85c9f97c0b2109b5287d8'
-            'c91c0560f7e91694bab6a30d0c4f3b9fe26465f52502304b7c4ba64efaa50498'
-            '8088c534fafb336e7039093c1570100f6143cdb09421e3553be7553e28f6d9ea'
+            '443485f2d2cefb3f45e2d928d4fae1d0f0c7b6298c5d6c9469fe52d3da2ae668'
+            '486edf8df3ed5ebd657ea2a2be7d4a8ef65ec9fa5d25469f47492daa795d6ab2'
+            '4ac490810929d18f2bb7233f1b4602d45f3f6f04a0dd946eba3f34b1749018e5'
             'cb356998626b4049c9f78ce64ef14b32e001229aa4b7da04f14378d15c3da26d')
 
 pkgver() {
@@ -66,11 +62,9 @@ prepare() {
   patch -p1 < "$srcdir/1846.patch"
   patch -p1 < "$srcdir/1546.patch"
   patch -p1 < "$srcdir/choppy-mouse-168.patch"
-  patch -p1 < "$srcdir/2173_rev.patch"
-  patch -p1 < "$srcdir/round_and_blur_41.1.patch"
-  patch -p1 < "$srcdir/round_and_blur_41.1_fix1.patch"
-  patch -p1 < "$srcdir/round_and_blur_41.1_fix2.patch"
-  patch -p1 < "$srcdir/round_and_blur_41.1_fix3.patch"
+  patch -p1 < "$srcdir/0001-revert-MR-2173-no-new-gsettings-schema.patch"
+  patch -p1 < "$srcdir/0002-Mutter-Rounded-Blur-41.1-patch.patch"
+  patch -p1 < "$srcdir/0003-Fix-order-between-animations-and-blur.patch"
 }
 
 build() {

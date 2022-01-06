@@ -1,17 +1,23 @@
-From d23a27bc82fa2be5038a4a8bf90f5ab28b83f4b4 Mon Sep 17 00:00:00 2001
-From: LuoYi <langisme@qq.com>
-Date: Mon, 22 Nov 2021 11:15:29 +0800
-Subject: [PATCH] Upgrade to 41.1
+From b8f897b938dfe92999ca2ce066782b736b7c5f81 Mon Sep 17 00:00:00 2001
+From: ninez <johnstonljordan@gmail.com>
+Date: Thu, 6 Jan 2022 14:27:08 -0500
+Subject: [PATCH 2/3] Mutter Rounded/Blur 41.1 patch
 
- - modified patch to get rid of the author's development environment crap. 
-   Pro-tip; keep your locally needed changes as separate commits.
+ Add the Mutter-ROunded patch for Gnome 41.1, as found here:
 
+ https://github.com/yilozt/mutter
+
+ NOTE: I removed all of the vscode and sh scripts that the developer committed
+       along with their mutter changes... that should've been committed
+       separately anyway.
+
+Signed-off-by: ninez <johnstonljordan@gmail.com>
 ---
  data/org.gnome.mutter.gschema.xml.in       |  72 ++
  src/compositor/compositor-private.h        |   2 +
  src/compositor/compositor.c                |  90 ++
  src/compositor/meta-window-actor-private.h |  11 +
- src/compositor/meta-window-actor-wayland.c | 378 ++++++++
+ src/compositor/meta-window-actor-wayland.c | 379 ++++++++
  src/compositor/meta-window-actor-x11.c     |  48 +-
  src/compositor/meta-window-actor.c         | 333 +++++++
  src/core/prefs.c                           | 262 ++++++
@@ -25,16 +31,7 @@ Subject: [PATCH] Upgrade to 41.1
  src/ui/frames.c                            |  21 +
  src/ui/frames.h                            |   4 +
  src/wayland/meta-window-wayland.c          |   3 +
- 28 files changed, 2860 insertions(+), 6 deletions(-)
- create mode 100644 .gitattributes
- create mode 100644 .vscode/c_cpp_properties.json
- create mode 100644 .vscode/launch.json
- create mode 100644 .vscode/settings.json
- create mode 100644 .vscode/tasks.json
- create mode 100755 scripts/blur_get/get.sh
- create mode 100755 scripts/build
- create mode 100755 scripts/genpatch
- create mode 100755 scripts/test
+ 18 files changed, 2704 insertions(+), 6 deletions(-)
  create mode 100644 src/meta_clip_effect.c
  create mode 100644 src/meta_clip_effect.h
  create mode 100644 src/shader.h
@@ -42,10 +39,10 @@ Subject: [PATCH] Upgrade to 41.1
  create mode 100644 src/shell-blur-effect.h
 
 diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
-index 23fa9f3ad3..eee73e7083 100644
+index aa2fdd421..d1e51338a 100644
 --- a/data/org.gnome.mutter.gschema.xml.in
 +++ b/data/org.gnome.mutter.gschema.xml.in
-@@ -2,6 +2,78 @@
+@@ -11,6 +11,78 @@
    <schema id="org.gnome.mutter" path="/org/gnome/mutter/"
            gettext-domain="@GETTEXT_DOMAIN@">
  
@@ -125,7 +122,7 @@ index 23fa9f3ad3..eee73e7083 100644
        <default>'Super_L'</default>
        <summary>Modifier to use for extended window management operations</summary>
 diff --git a/src/compositor/compositor-private.h b/src/compositor/compositor-private.h
-index 580618e481..f62de19248 100644
+index 580618e48..f62de1924 100644
 --- a/src/compositor/compositor-private.h
 +++ b/src/compositor/compositor-private.h
 @@ -82,6 +82,8 @@ gboolean meta_compositor_is_switching_workspace (MetaCompositor *compositor);
@@ -138,7 +135,7 @@ index 580618e481..f62de19248 100644
   * This function takes a 64 bit time stamp from the monotonic clock, and clamps
   * it to the scope of the X server clock, without losing the granularity.
 diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
-index 9cdd39c15d..50099ed121 100644
+index ee6be007b..fb8d3e357 100644
 --- a/src/compositor/compositor.c
 +++ b/src/compositor/compositor.c
 @@ -85,6 +85,8 @@
@@ -150,7 +147,7 @@ index 9cdd39c15d..50099ed121 100644
  enum
  {
    PROP_0,
-@@ -618,6 +620,10 @@ meta_compositor_add_window (MetaCompositor    *compositor,
+@@ -609,6 +611,10 @@ meta_compositor_add_window (MetaCompositor    *compositor,
     * before we first paint.
     */
    priv->windows = g_list_append (priv->windows, window_actor);
@@ -161,7 +158,7 @@ index 9cdd39c15d..50099ed121 100644
    sync_actor_stacking (compositor);
  }
  
-@@ -664,6 +670,7 @@ meta_compositor_queue_frame_drawn (MetaCompositor *compositor,
+@@ -655,6 +661,7 @@ meta_compositor_queue_frame_drawn (MetaCompositor *compositor,
    MetaWindowActor *window_actor = meta_window_actor_from_window (window);
  
    meta_window_actor_queue_frame_drawn (window_actor, no_delay_frame);
@@ -169,7 +166,7 @@ index 9cdd39c15d..50099ed121 100644
  }
  
  void
-@@ -995,6 +1002,20 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
+@@ -986,6 +993,20 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
  
    sync_actor_stacking (compositor);
  
@@ -190,7 +187,7 @@ index 9cdd39c15d..50099ed121 100644
    top_window_actor = get_top_visible_window_actor (compositor);
  
    if (priv->top_window_actor == top_window_actor)
-@@ -1025,7 +1046,17 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
+@@ -1016,7 +1037,17 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
    changes = meta_window_actor_sync_actor_geometry (window_actor, did_placement);
  
    if (changes & META_WINDOW_ACTOR_CHANGE_SIZE)
@@ -208,7 +205,7 @@ index 9cdd39c15d..50099ed121 100644
  }
  
  static void
-@@ -1191,6 +1222,44 @@ meta_compositor_get_property (GObject    *object,
+@@ -1182,6 +1213,44 @@ meta_compositor_get_property (GObject    *object,
      }
  }
  
@@ -253,7 +250,7 @@ index 9cdd39c15d..50099ed121 100644
  static void
  meta_compositor_init (MetaCompositor *compositor)
  {
-@@ -1221,6 +1290,8 @@ meta_compositor_constructed (GObject *object)
+@@ -1212,6 +1281,8 @@ meta_compositor_constructed (GObject *object)
  
    priv->laters = meta_laters_new (compositor);
  
@@ -262,7 +259,7 @@ index 9cdd39c15d..50099ed121 100644
    G_OBJECT_CLASS (meta_compositor_parent_class)->constructed (object);
  }
  
-@@ -1246,6 +1317,8 @@ meta_compositor_dispose (GObject *object)
+@@ -1237,6 +1308,8 @@ meta_compositor_dispose (GObject *object)
    g_clear_pointer (&priv->feedback_group, clutter_actor_destroy);
    g_clear_pointer (&priv->windows, g_list_free);
  
@@ -271,7 +268,7 @@ index 9cdd39c15d..50099ed121 100644
    G_OBJECT_CLASS (meta_compositor_parent_class)->dispose (object);
  }
  
-@@ -1579,3 +1652,20 @@ meta_compositor_get_laters (MetaCompositor *compositor)
+@@ -1570,3 +1643,20 @@ meta_compositor_get_laters (MetaCompositor *compositor)
  
    return priv->laters;
  }
@@ -294,10 +291,10 @@ index 9cdd39c15d..50099ed121 100644
 +}
 \ No newline at end of file
 diff --git a/src/compositor/meta-window-actor-private.h b/src/compositor/meta-window-actor-private.h
-index adae065477..eea31fa411 100644
+index 035eebb08..400540d10 100644
 --- a/src/compositor/meta-window-actor-private.h
 +++ b/src/compositor/meta-window-actor-private.h
-@@ -102,4 +102,15 @@ void meta_window_actor_update_regions (MetaWindowActor *self);
+@@ -104,4 +104,15 @@ void meta_window_actor_update_regions (MetaWindowActor *self);
  
  gboolean meta_window_actor_can_freeze_commits (MetaWindowActor *self);
  
@@ -314,7 +311,7 @@ index adae065477..eea31fa411 100644
 +void meta_window_actor_update_blur_window_opacity (MetaWindowActor *self);
  #endif /* META_WINDOW_ACTOR_PRIVATE_H */
 diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
-index 641c924db3..28f1920f8a 100644
+index bdc5c5a53..74bb09a09 100644
 --- a/src/compositor/meta-window-actor-wayland.c
 +++ b/src/compositor/meta-window-actor-wayland.c
 @@ -24,10 +24,36 @@
@@ -354,10 +351,11 @@ index 641c924db3..28f1920f8a 100644
  };
  
  G_DEFINE_TYPE (MetaWindowActorWayland, meta_window_actor_wayland, META_TYPE_WINDOW_ACTOR)
-@@ -89,17 +115,53 @@ meta_window_actor_wayland_rebuild_surfac
+@@ -88,18 +114,54 @@ meta_window_actor_wayland_rebuild_surface_tree (MetaWindowActor *actor)
+                    &traverse_data);
  }
  
- static void
++static void
 +surface_size_changed (MetaSurfaceActor *actor,
 +                      gpointer          user_data)
 +{
@@ -375,7 +373,7 @@ index 641c924db3..28f1920f8a 100644
 +}
 +
 +
-+static void
+ static void
  meta_window_actor_wayland_assign_surface_actor (MetaWindowActor  *actor,
                                                  MetaSurfaceActor *surface_actor)
  {
@@ -408,7 +406,7 @@ index 641c924db3..28f1920f8a 100644
  }
  
  static void
-@@ -115,10 +177,287 @@ meta_window_actor_wayland_queue_frame_dr
+@@ -115,10 +177,287 @@ meta_window_actor_wayland_queue_frame_drawn (MetaWindowActor *actor,
  {
  }
  
@@ -696,10 +694,11 @@ index 641c924db3..28f1920f8a 100644
  }
  
  static void
-@@ -150,14 +489,34 @@ meta_window_actor_wayland_can_freeze_com
+@@ -149,15 +488,35 @@ meta_window_actor_wayland_can_freeze_commits (MetaWindowActor *actor)
+   return FALSE;
  }
  
- static void
++static void
 +meta_window_actor_wayland_constructed (GObject *object)
 +{
 +  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (object);
@@ -714,7 +713,7 @@ index 641c924db3..28f1920f8a 100644
 +}
 +
 +
-+static void
+ static void
  meta_window_actor_wayland_dispose (GObject *object)
  {
    MetaWindowActor *window_actor = META_WINDOW_ACTOR (object);
@@ -731,7 +730,7 @@ index 641c924db3..28f1920f8a 100644
    children = clutter_actor_get_children (CLUTTER_ACTOR (window_actor));
    for (l = children; l; l = l->next)
      {
-@@ -167,7 +526,17 @@ meta_window_actor_wayland_dispose (GObje
+@@ -167,7 +526,17 @@ meta_window_actor_wayland_dispose (GObject *object)
            child_actor != CLUTTER_ACTOR (surface_actor))
          clutter_actor_remove_child (CLUTTER_ACTOR (window_actor), child_actor);
      }
@@ -757,7 +756,7 @@ index 641c924db3..28f1920f8a 100644
    GObjectClass *object_class = G_OBJECT_CLASS (klass);
  
    window_actor_class->assign_surface_actor = meta_window_actor_wayland_assign_surface_actor;
-@@ -187,10 +557,19 @@ meta_window_actor_wayland_class_init (Me
+@@ -187,10 +557,19 @@ meta_window_actor_wayland_class_init (MetaWindowActorWaylandClass *klass)
    window_actor_class->update_regions = meta_window_actor_wayland_update_regions;
    window_actor_class->can_freeze_commits = meta_window_actor_wayland_can_freeze_commits;
  
@@ -778,7 +777,7 @@ index 641c924db3..28f1920f8a 100644
 +                              self);
  }
 diff --git a/src/compositor/meta-window-actor-x11.c b/src/compositor/meta-window-actor-x11.c
-index 9e64462ea8..7c003a3428 100644
+index 9e64462ea..7c003a342 100644
 --- a/src/compositor/meta-window-actor-x11.c
 +++ b/src/compositor/meta-window-actor-x11.c
 @@ -142,7 +142,8 @@ surface_repaint_scheduled (MetaSurfaceActor *actor,
@@ -893,7 +892,7 @@ index 9e64462ea8..7c003a3428 100644
  
        /* The frame bounds are already subtracted from actor_x11->shadow_clip
 diff --git a/src/compositor/meta-window-actor.c b/src/compositor/meta-window-actor.c
-index b32df2010c..0f7b82f278 100644
+index b32df2010..0f7b82f27 100644
 --- a/src/compositor/meta-window-actor.c
 +++ b/src/compositor/meta-window-actor.c
 @@ -41,6 +41,9 @@
@@ -1321,7 +1320,7 @@ index b32df2010c..0f7b82f278 100644
  meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
                                         gboolean         did_placement)
 diff --git a/src/core/prefs.c b/src/core/prefs.c
-index 536d9dd579..aaa3af5bbf 100644
+index 536d9dd57..aaa3af5bb 100644
 --- a/src/core/prefs.c
 +++ b/src/core/prefs.c
 @@ -33,6 +33,8 @@
@@ -1648,7 +1647,7 @@ index 536d9dd579..aaa3af5bbf 100644
 +}
 \ No newline at end of file
 diff --git a/src/meson.build b/src/meson.build
-index f3aebfb285..cf9cf4b61d 100644
+index 6e043d5e8..45182a756 100644
 --- a/src/meson.build
 +++ b/src/meson.build
 @@ -169,6 +169,18 @@ if get_option('verbose')
@@ -1678,8 +1677,8 @@ index f3aebfb285..cf9cf4b61d 100644
 +  'meta_clip_effect.h',
  ]
  
- if have_egl
-@@ -993,7 +1007,8 @@ subdir('meta')
+ if have_egl_device
+@@ -1017,7 +1031,8 @@ subdir('meta')
  mutter_built_sources += mutter_enum_types
  
  libmutter = shared_library(libmutter_name,
@@ -1690,7 +1689,7 @@ index f3aebfb285..cf9cf4b61d 100644
    version: '0.0.0',
    soversion: 0,
 diff --git a/src/meta/prefs.h b/src/meta/prefs.h
-index 227de68bf2..100980537d 100644
+index 227de68bf..100980537 100644
 --- a/src/meta/prefs.h
 +++ b/src/meta/prefs.h
 @@ -106,6 +106,15 @@ typedef enum
@@ -1742,7 +1741,7 @@ index 227de68bf2..100980537d 100644
   * @META_KEYBINDING_ACTION_NONE: FILLME
 diff --git a/src/meta_clip_effect.c b/src/meta_clip_effect.c
 new file mode 100644
-index 0000000000..408eefde9d
+index 000000000..408eefde9
 --- /dev/null
 +++ b/src/meta_clip_effect.c
 @@ -0,0 +1,239 @@
@@ -1988,7 +1987,7 @@ index 0000000000..408eefde9d
 \ No newline at end of file
 diff --git a/src/meta_clip_effect.h b/src/meta_clip_effect.h
 new file mode 100644
-index 0000000000..ab20b10871
+index 000000000..ab20b1087
 --- /dev/null
 +++ b/src/meta_clip_effect.h
 @@ -0,0 +1,20 @@
@@ -2015,7 +2014,7 @@ index 0000000000..ab20b10871
 \ No newline at end of file
 diff --git a/src/shader.h b/src/shader.h
 new file mode 100644
-index 0000000000..ce06ad0b10
+index 000000000..ce06ad0b1
 --- /dev/null
 +++ b/src/shader.h
 @@ -0,0 +1,141 @@
@@ -2162,7 +2161,7 @@ index 0000000000..ce06ad0b10
 +"cogl_color_out.rgb *= brightness;                                        \n"
 diff --git a/src/shell-blur-effect.c b/src/shell-blur-effect.c
 new file mode 100644
-index 0000000000..36d4c5ede9
+index 000000000..36d4c5ede
 --- /dev/null
 +++ b/src/shell-blur-effect.c
 @@ -0,0 +1,971 @@
@@ -3139,7 +3138,7 @@ index 0000000000..36d4c5ede9
 +}
 diff --git a/src/shell-blur-effect.h b/src/shell-blur-effect.h
 new file mode 100644
-index 0000000000..bc89c00e92
+index 000000000..bc89c00e9
 --- /dev/null
 +++ b/src/shell-blur-effect.h
 @@ -0,0 +1,64 @@
@@ -3208,7 +3207,7 @@ index 0000000000..bc89c00e92
 +
 +G_END_DECLS
 diff --git a/src/ui/frames.c b/src/ui/frames.c
-index 48b2a361c2..8be6a8f8ba 100644
+index 0213395f6..fcafd0ca0 100644
 --- a/src/ui/frames.c
 +++ b/src/ui/frames.c
 @@ -711,6 +711,27 @@ meta_ui_frame_get_bounds (MetaUIFrame *frame)
@@ -3240,10 +3239,10 @@ index 48b2a361c2..8be6a8f8ba 100644
  meta_ui_frame_move_resize (MetaUIFrame *frame,
                             int x, int y, int width, int height)
 diff --git a/src/ui/frames.h b/src/ui/frames.h
-index d81be1c726..c32a93d99b 100644
+index 89b399265..8262f0446 100644
 --- a/src/ui/frames.h
 +++ b/src/ui/frames.h
-@@ -134,6 +134,10 @@ void meta_ui_frame_get_borders (MetaUIFrame      *frame,
+@@ -139,6 +139,10 @@ void meta_ui_frame_get_borders (MetaUIFrame      *frame,
  
  cairo_region_t * meta_ui_frame_get_bounds (MetaUIFrame *frame);
  
@@ -3255,10 +3254,10 @@ index d81be1c726..c32a93d99b 100644
                               cairo_rectangle_int_t *frame_rect,
                               cairo_t               *cr);
 diff --git a/src/wayland/meta-window-wayland.c b/src/wayland/meta-window-wayland.c
-index 12e9567d9c..7138330bc9 100644
+index fb7198e8b..3043acab9 100644
 --- a/src/wayland/meta-window-wayland.c
 +++ b/src/wayland/meta-window-wayland.c
-@@ -1002,6 +1002,9 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
+@@ -1021,6 +1021,9 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
      gravity = META_GRAVITY_STATIC;
    meta_window_move_resize_internal (window, flags, gravity, rect);
  
@@ -3268,4 +3267,6 @@ index 12e9567d9c..7138330bc9 100644
    g_clear_pointer (&acked_configuration, meta_wayland_window_configuration_free);
  }
  
+-- 
+2.34.1
 
