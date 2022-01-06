@@ -1,0 +1,9 @@
+README
+
+- Arch packages / patches that i use for gnome 41
+
+experimental. i break a few things in my quest to have a gnome-based desktop 
+that i like. Overview is killed. i use the gnome-rounded patch with my own 
+animation / blur fixes.
+
+no support provided. i only test in Xorg and i use SSDs, not gnome CSDs.
