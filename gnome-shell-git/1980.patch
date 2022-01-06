@@ -1,0 +1,64 @@
+From 45c218fe84d7731eb11a0bfadd1dfde4c2e6cadd Mon Sep 17 00:00:00 2001
+From: Sebastian Keller <skeller@gnome.org>
+Date: Sat, 18 Sep 2021 17:01:21 +0200
+Subject: [PATCH] workspace: Scale slots to current workspace size when layout
+ is frozen
+
+The transition from the overview freezes the workspace layout at the
+start of the animation, which means that the calculated window slots
+remain the same while the workspace itslef grows. This causes the
+windows to appear slightly shrunk in comparison to the workspace and
+shifted to the top left. This is especially noticeable during the
+beginning of the animation when there is more weight on the slots than
+the original window position and if there are not that many open
+windows.
+
+Unfreezing the layout for this transition is not possible, because it
+would cause issues with newly opened windows abruptly changing the
+layout when the animation happens after starting a new app.
+
+This change instead tries to scale the frozen layout to the current
+workspace size. While this is not entirely correct, because this scales
+the spacing between the slots as well, it is still more accurate than
+the completely unscaled slots.
+
+Fixes: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/4616
+---
+ js/ui/workspace.js | 12 ++++++++++--
+ 1 file changed, 10 insertions(+), 2 deletions(-)
+
+diff --git a/js/ui/workspace.js b/js/ui/workspace.js
+index 6c32f01da9..94eeb0a9d0 100644
+--- a/js/ui/workspace.js
++++ b/js/ui/workspace.js
+@@ -667,10 +667,13 @@ var WorkspaceLayout = GObject.registerClass({
+                 layoutChanged = true;
+             }
+ 
+-            if (layoutChanged || containerAllocationChanged)
+-                this._windowSlots = this._getWindowSlots(box.copy());
++            if (layoutChanged || containerAllocationChanged) {
++                this._windowSlotsBox = box.copy();
++                this._windowSlots = this._getWindowSlots(this._windowSlotsBox);
++            }
+         }
+ 
++        const slotsScale = box.get_width() / this._windowSlotsBox.get_width();
+         const workareaX = this._workarea.x;
+         const workareaY = this._workarea.y;
+         const workareaWidth = this._workarea.width;
+@@ -686,6 +689,11 @@ var WorkspaceLayout = GObject.registerClass({
+             if (!child.visible)
+                 continue;
+ 
++            x *= slotsScale;
++            y *= slotsScale;
++            width *= slotsScale;
++            height *= slotsScale;
++
+             const windowInfo = this._windows.get(child);
+ 
+             let workspaceBoxX, workspaceBoxY;
+-- 
+GitLab
+

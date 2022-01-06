@@ -1,0 +1,118 @@
+From 34af7cb43e26449772097d6ae52407ad001671bb Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Thu, 9 Jan 2020 16:55:05 +0800
+Subject: [PATCH] js/ui: Keep refcounts to WallClock objects above 1
+
+Because if you let them bounce between 1 and 2 then they will trigger
+toggle references every time the object's properties change (maybe every
+second). Even if you're not subscribed to `notify::clock` but subscribed
+to `notify::timezone` then it's still a problem as the ref/unreffing
+happens within the GObject notify logic, even if the subscription detail
+means you don't get those callbacks.
+
+Now because the toggle references on `WallClock` objects are not toggling
+down any more, they won't queue the "big hammer" garbage collection to run
+every 10 seconds (gjs@e9e96955). And CPU spikes from that regular garbage
+collection (which also caused visible stutter sometimes) are avoided.
+
+Closes: https://gitlab.gnome.org/GNOME/gnome-shell/issues/2085,
+        https://gitlab.gnome.org/GNOME/gnome-shell/issues/4800
+---
+ js/ui/background.js   | 12 +++++++++++-
+ js/ui/dateMenu.js     | 15 ++++++++++++++-
+ js/ui/unlockDialog.js | 11 +++++++++--
+ 3 files changed, 34 insertions(+), 4 deletions(-)
+
+diff --git a/js/ui/background.js b/js/ui/background.js
+index 1f7c5e572..d6936b25c 100644
+--- a/js/ui/background.js
++++ b/js/ui/background.js
+@@ -245,6 +245,13 @@ var Background = GObject.registerClass({
+         this.isLoaded = false;
+ 
+         this._clock = new GnomeDesktop.WallClock();
++        /*
++         * Extra _clock.ref() is required to stop toggle references from
++         * triggering garbage collection every time the clock emits a tick,
++         * even though that's a notify::clock and not a notify::timezone.
++         * The reference still toggles internally within Glib.
++         */
++        this._clock.ref();
+         this._timezoneChangedId = this._clock.connect('notify::timezone',
+             () => {
+                 if (this._animation)
+@@ -280,7 +287,10 @@ var Background = GObject.registerClass({
+             this._clock.disconnect(this._timezoneChangedId);
+         this._timezoneChangedId = 0;
+ 
+-        this._clock = null;
++        if (this._clock) {
++            this._clock.unref();
++            this._clock = null;
++        }
+ 
+         if (this._prepareForSleepId != 0)
+             LoginManager.getLoginManager().disconnect(this._prepareForSleepId);
+diff --git a/js/ui/dateMenu.js b/js/ui/dateMenu.js
+index 6edd790a0..e80987e30 100644
+--- a/js/ui/dateMenu.js
++++ b/js/ui/dateMenu.js
+@@ -876,11 +876,24 @@ class DateMenuButton extends PanelMenu.Button {
+         // Done with hbox for calendar and event list
+ 
+         this._clock = new GnomeDesktop.WallClock();
++        /*
++         * Extra _clock.ref() is required to stop toggle references from
++         * triggering garbage collection every time the clock emits a tick.
++         */
++        this._clock.ref();
+         this._clock.bind_property('clock', this._clockDisplay, 'text', GObject.BindingFlags.SYNC_CREATE);
+-        this._clock.connect('notify::timezone', this._updateTimeZone.bind(this));
++        this._timezoneChangedId = this._clock.connect('notify::timezone', this._updateTimeZone.bind(this));
+ 
+         Main.sessionMode.connect('updated', this._sessionUpdated.bind(this));
+         this._sessionUpdated();
++
++        this.connect('destroy', this._onDestroy.bind(this));
++    }
++
++    _onDestroy() {
++        this._clock.disconnect(this._timezoneChangedId);
++        this._clock.unref();
++        this._clock = null;
+     }
+ 
+     _getEventSource() {
+diff --git a/js/ui/unlockDialog.js b/js/ui/unlockDialog.js
+index 3ef6aa90f..eed2f8f86 100644
+--- a/js/ui/unlockDialog.js
++++ b/js/ui/unlockDialog.js
+@@ -338,7 +338,12 @@ class UnlockDialogClock extends St.BoxLayout {
+         this.add_child(this._hint);
+ 
+         this._wallClock = new GnomeDesktop.WallClock({ time_only: true });
+-        this._wallClock.connect('notify::clock', this._updateClock.bind(this));
++        /*
++         * Extra _wallClock.ref() is required to stop toggle references from
++         * triggering garbage collection every time the clock emits a tick.
++         */
++        this._wallClock.ref();
++        this._notifyClockId = this._wallClock.connect('notify::clock', this._updateClock.bind(this));
+ 
+         this._seat = Clutter.get_default_backend().get_default_seat();
+         this._touchModeChangedId = this._seat.connect('notify::touch-mode',
+@@ -379,7 +384,9 @@ class UnlockDialogClock extends St.BoxLayout {
+     }
+ 
+     _onDestroy() {
+-        this._wallClock.run_dispose();
++        this._wallClock.disconnect(this._notifyClockId);
++        this._wallClock.unref();
++        this._wallClock = null;
+ 
+         this._seat.disconnect(this._touchModeChangedId);
+         this._idleMonitor.remove_watch(this._idleWatchId);
+-- 
+GitLab
+
+

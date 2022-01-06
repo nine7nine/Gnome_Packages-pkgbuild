@@ -1,0 +1,112 @@
+# Maintainer: Ignacy Kuchciński (ignapk) <ignacykuchcinski@gmail.com>
+# Contributor: Simon Gardling <titaniumtown@gmail.com>
+# Contributor: Ricardo Liang (rliang) <ricardoliang@gmail.com>
+
+pkgname=mutter-git
+_pkgname=mutter
+pkgver=41.0+363+g4bcd4a6fa
+pkgrel=1
+pkgdesc="A window manager for GNOME."
+url="https://gitlab.gnome.org/GNOME/mutter"
+arch=(x86_64)
+license=(GPL)
+depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
+         libcanberra startup-notification zenity libsm gnome-desktop upower
+         libxkbcommon-x11 gnome-settings-daemon libgudev libinput pipewire
+         xorg-xwayland graphene libxkbfile glib2)
+makedepends=(gobject-introspection git egl-wayland meson xorg-server
+             wayland-protocols)
+provides=(mutter)
+conflicts=(mutter)
+groups=(gnome)
+
+_setting_src="mutter_setting::https://gitlab.gnome.org/lluo/mutter-rounded-setting/uploads/8f8e3f8d39f31e602c2d09884a6c5dd1/main.js"
+
+source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=4bcd4a6fab169599004444c9025199099562cc28"
+        '2173_rev.patch'
+	'2089.patch'
+	'2091.patch'
+	'2121.patch'
+	'1846.patch'
+	'1546.patch'
+	'choppy-mouse-168.patch'
+        'mr1441.patch'
+        "round_and_blur_41.1.patch"
+        "round_and_blur_41.1_fix1.patch"
+        "round_and_blur_41.1_fix2.patch"
+        "round_and_blur_41.1_fix3.patch"
+        "$_setting_src")
+sha256sums=('SKIP'
+            'bfaadc2a7e70004350798c8b7c1d841eb92e2aa0fb33f277ea8635c110d154e4'
+            '7f07bae4b95deb16020b64ea919a29c843dd19f62e8d49b458870cf81dbf8c70'
+            '98e2e267e9519636d26173716168965fc1ecb7f791179e753573ad758c6b3849'
+            'd9ac0a8d53264eca3c002f239525e4f588d6739d6688226ee7949475d61cbfaa'
+            'd2e815df4ade37a0934af8d299722a2a3ab054ff4edb2ab8e53c7b8376f16353'
+            '8f731c15622a87f0dbef9da8d6b47b847f26fef8a4bd9c69aef3540867a58b2b'
+            'ca8367e0256ed2aa5981cbd88ef660304966e8054e03e7f6d931c5597a332113'
+            '73deff06aed1918632456ca94bc667aa97c18cadd2420fde5b27b0bbae09db26'
+            '7eeddcc0a5cd3d0505b90833ada350479fa1f67d8a02a9451b2c560848a60893'
+            '766a1a91cfa93a7aded4a417e7092c50198c376ec4f85c9f97c0b2109b5287d8'
+            'c91c0560f7e91694bab6a30d0c4f3b9fe26465f52502304b7c4ba64efaa50498'
+            '8088c534fafb336e7039093c1570100f6143cdb09421e3553be7553e28f6d9ea'
+            'cb356998626b4049c9f78ce64ef14b32e001229aa4b7da04f14378d15c3da26d')
+
+pkgver() {
+  cd $_pkgname
+  git describe --tags | sed 's/-/+/g'
+}
+
+prepare() {
+  cd "$srcdir/mutter"
+  patch -p1 < "$srcdir/mr1441.patch"
+  patch -p1 < "$srcdir/2121.patch"
+  patch -p1 < "$srcdir/2089.patch"
+  patch -p1 < "$srcdir/2091.patch"
+  patch -p1 < "$srcdir/1846.patch"
+  patch -p1 < "$srcdir/1546.patch"
+  patch -p1 < "$srcdir/choppy-mouse-168.patch"
+  patch -p1 < "$srcdir/2173_rev.patch"
+  patch -p1 < "$srcdir/round_and_blur_41.1.patch"
+  patch -p1 < "$srcdir/round_and_blur_41.1_fix1.patch"
+  patch -p1 < "$srcdir/round_and_blur_41.1_fix2.patch"
+  patch -p1 < "$srcdir/round_and_blur_41.1_fix3.patch"
+}
+
+build() {
+  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
+  LDFLAGS+=" -Wl,-Bsymbolic-functions"
+  arch-meson $_pkgname build \
+    -D egl_device=true \
+    -D wayland_eglstream=true \
+    -D installed_tests=false \
+    -D profiler=false \
+    -D tests=false
+  meson compile -C build
+}
+
+_check() (
+  mkdir -p -m 700 "${XDG_RUNTIME_DIR:=$PWD/runtime-dir}"
+  glib-compile-schemas "${GSETTINGS_SCHEMA_DIR:=$PWD/build/data}"
+  export XDG_RUNTIME_DIR GSETTINGS_SCHEMA_DIR
+
+  pipewire &
+  _p1=$!
+
+  pipewire-media-session &
+  _p2=$!
+
+  trap "kill $_p1 $_p2; wait" EXIT
+
+  meson test -C build --print-errorlogs
+)
+
+check() {
+  dbus-run-session xvfb-run \
+    -s '-screen 0 1920x1080x24 -nolisten local +iglx -noreset' \
+    bash -c "$(declare -f _check); _check"
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+  install mutter_setting $pkgdir/usr/bin/
+}

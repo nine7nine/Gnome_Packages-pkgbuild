@@ -1,0 +1,15 @@
+--- a/src/compositor/meta-window-actor.c.orig	2022-01-05 21:32:01.911883696 -0500
++++ b/src/compositor/meta-window-actor.c	2022-01-05 21:30:17.424850160 -0500
+@@ -1041,6 +1041,10 @@ meta_window_actor_after_effects (MetaWin
+       g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
+       meta_window_actor_sync_visibility (self);
+       meta_window_actor_sync_actor_geometry (self, FALSE);
++      if (priv->round_clip_effect && !priv->unminimize_in_progress)
++        {
++         meta_window_actor_show_blur(self);
++        } 
+     }
+ 
+   clutter_stage_repick_device (stage, clutter_seat_get_pointer (seat));
+
+

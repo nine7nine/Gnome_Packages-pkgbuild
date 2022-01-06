@@ -1,0 +1,32 @@
+From e3d982bfbe088ac254e3755f4efeb18dc1f865c8 Mon Sep 17 00:00:00 2001
+From: Simon Sherred <simonraindrum@gmail.com>
+Date: Fri, 30 Apr 2021 18:35:13 +0000
+Subject: [PATCH] Reenable touch-mode on touchscreen devices with pointers.
+
+---
+ src/backends/native/meta-seat-impl.c | 7 ++++---
+ 1 file changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/src/backends/native/meta-seat-impl.c b/src/backends/native/meta-seat-impl.c
+index 26db30bd42..0d20cda2a5 100644
+--- a/src/backends/native/meta-seat-impl.c
++++ b/src/backends/native/meta-seat-impl.c
+@@ -1595,11 +1595,12 @@ update_touch_mode (MetaSeatImpl *seat_impl)
+   /* If tablet mode is enabled, go for it */
+   else if (seat_impl->has_tablet_switch && seat_impl->tablet_mode_switch_state)
+     touch_mode = TRUE;
+-  /* If there is no tablet mode switch (eg. kiosk machines),
+-   * assume touch-mode is mutually exclusive with pointers.
++  /* If there is no tablet mode switch (eg. kiosk machines
++   * and 2-in-1 laptops that do not report SW_TABLET_MODE),
++   * assume touch-mode.
+    */
+   else
+-    touch_mode = !seat_impl->has_pointer;
++    touch_mode = TRUE;
+ 
+   if (seat_impl->touch_mode != touch_mode)
+     {
+-- 
+GitLab
+

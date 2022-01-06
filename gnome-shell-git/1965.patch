@@ -1,0 +1,73 @@
+From ac8a9150068bbbcf8334b0d50fb76af4c19f62d7 Mon Sep 17 00:00:00 2001
+From: Ivan Molodetskikh <yalterz@gmail.com>
+Date: Mon, 16 Aug 2021 09:55:47 +0300
+Subject: [PATCH 1/2] dnd: Properly end dragging with dropFunc
+
+When dropFunc was used, dragging wasn't ended properly (like in the
+normal flow of the function), causing glitches.
+---
+ js/ui/dnd.js | 15 +++++++++++++++
+ 1 file changed, 15 insertions(+)
+
+diff --git a/js/ui/dnd.js b/js/ui/dnd.js
+index cefde6f603..d60a70f069 100644
+--- a/js/ui/dnd.js
++++ b/js/ui/dnd.js
+@@ -628,7 +628,22 @@ var _Draggable = class _Draggable {
+             if (dropFunc) {
+                 switch (dropFunc(dropEvent)) {
+                 case DragDropResult.FAILURE:
++                    this._cancelDrag(event.get_time());
++                    return true;
+                 case DragDropResult.SUCCESS:
++                    if (this._dragActor && this._dragActor.get_parent() === Main.uiGroup) {
++                        if (this._restoreOnSuccess) {
++                            this._restoreDragActor(event.get_time());
++                            return true;
++                        } else {
++                            this._dragActor.destroy();
++                        }
++                    }
++
++                    this._dragState = DragState.INIT;
++                    global.display.set_cursor(Meta.Cursor.DEFAULT);
++                    this.emit('drag-end', event.get_time(), true);
++                    this._dragComplete();
+                     return true;
+                 case DragDropResult.CONTINUE:
+                     continue;
+-- 
+GitLab
+
+
+From 9b91333ff38d043a2bb81b266b41e26014795a49 Mon Sep 17 00:00:00 2001
+From: Ivan Molodetskikh <yalterz@gmail.com>
+Date: Mon, 16 Aug 2021 09:57:07 +0300
+Subject: [PATCH 2/2] dnd: Add drag-motion signal
+
+The signal is emitted whenever the drag actor's position is updated,
+allowing to accurately track its movement. For example, in the new
+screenshot UI this is used for handle dragging in area selection mode:
+when the handle is moved by dnd code, the selection rect needs to move
+along with it, and this signal provides the means to do just that
+without introducing a 1-frame lag.
+---
+ js/ui/dnd.js | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/js/ui/dnd.js b/js/ui/dnd.js
+index d60a70f069..3ee669c4a5 100644
+--- a/js/ui/dnd.js
++++ b/js/ui/dnd.js
+@@ -606,6 +606,8 @@ var _Draggable = class _Draggable {
+         this._dragActor.set_position(stageX + this._dragOffsetX,
+                                      stageY + this._dragOffsetY);
+ 
++        this.emit('drag-motion', event.get_time(), this._dragActor);
++
+         this._queueUpdateDragHover();
+         return true;
+     }
+-- 
+GitLab
+

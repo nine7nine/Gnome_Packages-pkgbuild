@@ -1,0 +1,188 @@
+From 5bec5d0270255b0596648201fc3b970cd6ac4116 Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Mon, 2 Nov 2020 16:19:27 +0800
+Subject: [PATCH 1/2] clutter/damage-history: Support non-power-of-two
+ DAMAGE_HISTORY_LENGTH
+
+It's the same result, but will work for any positive array length.
+---
+ clutter/clutter/clutter-damage-history.c | 15 ++++++++++-----
+ 1 file changed, 10 insertions(+), 5 deletions(-)
+
+diff --git a/clutter/clutter/clutter-damage-history.c b/clutter/clutter/clutter-damage-history.c
+index d5e86f1b76..56fa25c635 100644
+--- a/clutter/clutter/clutter-damage-history.c
++++ b/clutter/clutter/clutter-damage-history.c
+@@ -25,7 +25,7 @@
+ struct _ClutterDamageHistory
+ {
+   cairo_region_t *damages[DAMAGE_HISTORY_LENGTH];
+-  int index;
++  unsigned int index;
+ };
+ 
+ ClutterDamageHistory *
+@@ -71,11 +71,16 @@ clutter_damage_history_record (ClutterDamageHistory *history,
+   history->damages[history->index] = cairo_region_copy (damage);
+ }
+ 
+-static inline int
+-step_damage_index (int current,
+-                   int diff)
++static inline unsigned int
++step_damage_index (unsigned int current,
++                   int          diff)
+ {
+-  return (current + diff) & (DAMAGE_HISTORY_LENGTH - 1);
++  unsigned int ret;
++
++  ret = (unsigned int) (current + diff + DAMAGE_HISTORY_LENGTH) %
++    DAMAGE_HISTORY_LENGTH;
++
++  return ret;
+ }
+ 
+ void
+-- 
+GitLab
+
+
+From 8adefcb1f4430614dae91e016d71617039577b78 Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Mon, 2 Nov 2020 17:04:30 +0800
+Subject: [PATCH 2/2] clutter/damage-history: Dynamically (re)allocate the
+ history array
+
+Instead of hard-coding the size to 16, it will generally settle on
+a size of 3 now. That reduces the cairo_region_t memory usage from
+~90KB to ~15KB.
+---
+ clutter/clutter/clutter-damage-history.c | 60 +++++++++++++++++-------
+ 1 file changed, 43 insertions(+), 17 deletions(-)
+
+diff --git a/clutter/clutter/clutter-damage-history.c b/clutter/clutter/clutter-damage-history.c
+index 56fa25c635..f300cadf6e 100644
+--- a/clutter/clutter/clutter-damage-history.c
++++ b/clutter/clutter/clutter-damage-history.c
+@@ -20,20 +20,33 @@
+ 
+ #include "clutter-damage-history.h"
+ 
+-#define DAMAGE_HISTORY_LENGTH 0x10
++#define MAX_DAMAGE_HISTORY_LENGTH 16
+ 
+ struct _ClutterDamageHistory
+ {
+-  cairo_region_t *damages[DAMAGE_HISTORY_LENGTH];
++  GArray *damages;
+   unsigned int index;
+ };
+ 
++static void
++clear_cairo_region (cairo_region_t **region_ptr)
++{
++  g_clear_pointer (region_ptr, cairo_region_destroy);
++}
++
+ ClutterDamageHistory *
+ clutter_damage_history_new (void)
+ {
+   ClutterDamageHistory *history;
+ 
+   history = g_new0 (ClutterDamageHistory, 1);
++  history->damages = g_array_sized_new (FALSE,
++                                        TRUE,
++                                        sizeof (cairo_region_t *),
++                                        2);
++  g_array_set_clear_func (history->damages,
++                          (GDestroyNotify) clear_cairo_region);
++  g_array_set_size (history->damages, 2);
+ 
+   return history;
+ }
+@@ -41,11 +54,7 @@ clutter_damage_history_new (void)
+ void
+ clutter_damage_history_free (ClutterDamageHistory *history)
+ {
+-  int i;
+-
+-  for (i = 0; i < G_N_ELEMENTS (history->damages); i++)
+-    g_clear_pointer (&history->damages[i], cairo_region_destroy);
+-
++  g_array_free (history->damages, TRUE);
+   g_free (history);
+ }
+ 
+@@ -53,10 +62,21 @@ gboolean
+ clutter_damage_history_is_age_valid (ClutterDamageHistory *history,
+                                      int                   age)
+ {
+-  if (age >= DAMAGE_HISTORY_LENGTH ||
+-      age < 1)
++  const cairo_region_t *null = NULL;
++
++  if (age < 1 || age >= MAX_DAMAGE_HISTORY_LENGTH)
+     return FALSE;
+ 
++  /* If we need to grow the array then we also need to consider old array
++   * elements looked up as (history->index - some_age) probably need to move
++   * up such that their negative indicies modulo the new history->damages->len
++   * remain the same. So new elements get added at history->index which is
++   * the first of the unused elements. And the elements -1,-2... can still
++   * be found by clutter_damage_history_lookup.
++   */
++  while (age >= history->damages->len)
++    g_array_insert_val (history->damages, history->index, null);
++
+   if (!clutter_damage_history_lookup (history, age))
+     return FALSE;
+ 
+@@ -67,18 +87,22 @@ void
+ clutter_damage_history_record (ClutterDamageHistory *history,
+                                const cairo_region_t *damage)
+ {
+-  g_clear_pointer (&history->damages[history->index], cairo_region_destroy);
+-  history->damages[history->index] = cairo_region_copy (damage);
++  cairo_region_t **elem;
++
++  elem = &g_array_index (history->damages, cairo_region_t *, history->index);
++  clear_cairo_region (elem);
++
++  *elem = cairo_region_copy (damage);
+ }
+ 
+ static inline unsigned int
+-step_damage_index (unsigned int current,
+-                   int          diff)
++step_damage_index (const ClutterDamageHistory *history,
++                   int                         diff)
+ {
+   unsigned int ret;
+ 
+-  ret = (unsigned int) (current + diff + DAMAGE_HISTORY_LENGTH) %
+-    DAMAGE_HISTORY_LENGTH;
++  ret = (unsigned int) (history->index + diff + history->damages->len) %
++    history->damages->len;
+ 
+   return ret;
+ }
+@@ -86,12 +110,14 @@ step_damage_index (unsigned int current,
+ void
+ clutter_damage_history_step (ClutterDamageHistory *history)
+ {
+-  history->index = step_damage_index (history->index, 1);
++  history->index = step_damage_index (history, 1);
+ }
+ 
+ const cairo_region_t *
+ clutter_damage_history_lookup (ClutterDamageHistory *history,
+                                int                   age)
+ {
+-  return history->damages[step_damage_index (history->index, -age)];
++  return g_array_index (history->damages,
++                        cairo_region_t *,
++                        step_damage_index (history, -age));
+ }
+-- 
+GitLab
+

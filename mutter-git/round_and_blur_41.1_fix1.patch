@@ -1,0 +1,119 @@
+--- a/src/compositor/meta-window-actor.c.orig	2022-01-05 21:09:59.838314112 -0500
++++ b/src/compositor/meta-window-actor.c	2022-01-05 21:09:11.422029115 -0500
+@@ -906,6 +906,51 @@ is_freeze_thaw_effect (MetaPluginEffect
+   }
+ }
+ 
++static void
++meta_window_actor_remove_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  clutter_actor_remove_effect (priv->blur_actor, CLUTTER_EFFECT (priv->blur_effect));
++  clutter_actor_remove_child (parent, priv->blur_actor);
++}
++
++static void
++meta_window_actor_hide_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  //ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  clutter_actor_hide(priv->blur_actor);
++}
++
++static void
++meta_window_actor_show_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  //ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  meta_shell_blur_effect_set_mode (priv->blur_effect, SHELL_BLUR_MODE_BACKGROUND);
++  clutter_actor_add_effect_with_name (priv->blur_actor,
++                                      "ShellBlurEffect",
++                                      CLUTTER_EFFECT(priv->blur_effect));
++    if (priv->visible)
++    clutter_actor_show(priv->blur_actor);
++}
++
+ static gboolean
+ start_simple_effect (MetaWindowActor  *self,
+                      MetaPluginEffect  event)
+@@ -925,15 +970,29 @@ start_simple_effect (MetaWindowActor  *s
+   case META_PLUGIN_NONE:
+     return FALSE;
+   case META_PLUGIN_MINIMIZE:
++      if (priv->round_clip_effect)
++        {
++          meta_window_actor_hide_blur(self);
++        }
+     counter = &priv->minimize_in_progress;
+     break;
+   case META_PLUGIN_UNMINIMIZE:
++      if (priv->round_clip_effect)
++        {
++          meta_window_actor_hide_blur(self);
++        }
+     counter = &priv->unminimize_in_progress;
+     break;
+   case META_PLUGIN_MAP:
+     counter = &priv->map_in_progress;
+     break;
+   case META_PLUGIN_DESTROY:
++      if (priv->round_clip_effect)
++        {
++          clutter_actor_remove_effect (CLUTTER_ACTOR(self),
++                                       CLUTTER_EFFECT(priv->round_clip_effect));
++          meta_window_actor_remove_blur(self);
++        }
+     counter = &priv->destroy_in_progress;
+     break;
+   case META_PLUGIN_SIZE_CHANGE:
+@@ -963,20 +1022,6 @@ start_simple_effect (MetaWindowActor  *s
+ }
+ 
+ static void
+-meta_window_actor_remove_blur (MetaWindowActor *self)
+-{
+-  MetaWindowActorPrivate *priv =
+-    meta_window_actor_get_instance_private (self);
+-
+-  if (!priv->blur_actor)
+-    return;
+-
+-  ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
+-  clutter_actor_remove_effect (priv->blur_actor, CLUTTER_EFFECT (priv->blur_effect));
+-  clutter_actor_remove_child (parent, priv->blur_actor);
+-}
+-
+-static void
+ meta_window_actor_after_effects (MetaWindowActor *self)
+ {
+   MetaWindowActorPrivate *priv =
+@@ -989,12 +1034,6 @@ meta_window_actor_after_effects (MetaWin
+ 
+   if (priv->needs_destroy)
+     {
+-      if (priv->round_clip_effect)
+-        {
+-          clutter_actor_remove_effect (CLUTTER_ACTOR(self),
+-                                       CLUTTER_EFFECT(priv->round_clip_effect));
+-          meta_window_actor_remove_blur(self);
+-        }
+       clutter_actor_destroy (CLUTTER_ACTOR (self));
+     }
+   else
+

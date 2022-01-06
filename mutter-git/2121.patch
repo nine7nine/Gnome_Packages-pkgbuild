@@ -1,0 +1,35 @@
+From 87063719903a8a37902c4ebd3cb5f2bbebdba14c Mon Sep 17 00:00:00 2001
+From: Daniel van Vugt <daniel.van.vugt@canonical.com>
+Date: Mon, 29 Nov 2021 19:24:52 +0800
+Subject: [PATCH] clutter/frame-clock: Increase EstimateQueue length from 16 to
+ 256 frames
+
+The problem with a short queue length is that it never learns about
+periodic peaks in render time that are less frequent than once in 16
+frames. For example, a clock drawing once per second - every 60th frame.
+
+Increase the queue length to 256 so we learn the correct max render time
+for slow periodic peaks. This will cover the ticking clock case for any
+monitor up to 256Hz and avoids a frame skip when the tick happens.
+
+Fixes: https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/4830
+---
+ clutter/clutter/clutter-frame-clock.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/clutter/clutter/clutter-frame-clock.c b/clutter/clutter/clutter-frame-clock.c
+index 16098b70f9..95e30d2f4a 100644
+--- a/clutter/clutter/clutter-frame-clock.c
++++ b/clutter/clutter/clutter-frame-clock.c
+@@ -37,7 +37,7 @@ static guint signals[N_SIGNALS];
+ /* An estimate queue holds several int64_t values. Adding a new value to the
+  * queue overwrites the oldest value.
+  */
+-#define ESTIMATE_QUEUE_LENGTH 16
++#define ESTIMATE_QUEUE_LENGTH 256
+ 
+ typedef struct _EstimateQueue
+ {
+-- 
+GitLab
+

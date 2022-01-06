@@ -1,0 +1,21 @@
+--- a/js/ui/sessionMode.js	2021-12-18 08:05:47.328069822 -0500
++++ b/js/ui/sessionMode.js	2021-12-18 08:05:37.371864041 -0500
+@@ -69,7 +69,7 @@ const _modes = {
+     },
+ 
+     'user': {
+-        hasOverview: true,
++        hasOverview: false,
+         showCalendarEvents: true,
+         showWelcomeDialog: true,
+         allowSettings: true,
+@@ -89,7 +89,7 @@ const _modes = {
+                'keyring', 'autorunManager', 'automountManager'],
+ 
+         panel: {
+-            left: ['activities', 'appMenu'],
++            left: ['appMenu'],
+             center: ['dateMenu'],
+             right: ['dwellClick', 'a11y', 'keyboard', 'aggregateMenu'],
+         },
+

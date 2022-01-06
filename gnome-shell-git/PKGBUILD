@@ -1,0 +1,69 @@
+# Maintainer: Ignacy Kuchciński (ignapk) <ignacykuchcinski@gmail.com>
+# Contributor: Simon Gardling <titaniumtown@gmail.com>
+# Contributor: Ricardo Liang (rliang) <ricardoliang@gmail.com>
+
+pkgname=gnome-shell-git
+_pkgname=gnome-shell
+pkgver=41.0+115+g5909503c4
+pkgrel=1
+epoch=1
+pkgdesc="Next generation desktop shell"
+url="https://gitlab.gnome.org/GNOME/gnome-shell"
+arch=(x86_64)
+license=(GPL)
+depends=(accountsservice gcr gjs gnome-bluetooth upower gnome-session gtk4
+         gnome-settings-daemon gnome-themes-extra gsettings-desktop-schemas
+         libcanberra-pulse libgdm libsecret mutter-git nm-connection-editor unzip
+         gstreamer libibus gnome-autoar gnome-disk-utility gst-plugin-pipewire
+         libsoup3)
+makedepends=(gtk-doc gnome-control-center evolution-data-server
+             gobject-introspection git meson sassc asciidoc bash-completion
+             vulkan-headers)
+optdepends=('gnome-control-center: System settings'
+            'evolution-data-server: Evolution calendar integration')
+groups=(gnome)
+provides=(gnome-shell)
+conflicts=(gnome-shell)
+source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=5909503c458d1caf189ee8e884ab688712284448"
+	'999.patch'
+	'1739.patch'
+	'1744.patch'
+	'1980.patch'
+	'1965.patch'
+	'no_Overview_left_Clock.patch'
+	'1862.patch')
+sha256sums=('SKIP'
+            'c06b82da7b64cc1ba166e89a46941c49f4dadbb5bf233458c11b04180d49dc95'
+            '122b51c2137084d70d5ebffe546e0d4669510589ab1395e9fea15dfdbba1743f'
+            'cb850a35c25624207fece86b03211f29ee85cae1f664e424ba4f1de5a1f633f7'
+            '624a7ad9da1ff3c01d9333bf13ce2b8b2adddf65ea25d959410f446b50c4c70b'
+            '08a663e9a4ede6d314b88beb8899f171039e6e2ed4b8843de2e876bfd806fad6'
+            'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6'
+            '3c75aa729711be89f5bcb36ca6d058d242b23fd885d0ef89b79acdb62f8f5a18')
+
+pkgver() {
+  cd $_pkgname
+  git describe --tags | sed 's/-/+/g'
+}
+
+prepare() {
+  cd "$srcdir/$_pkgname"
+  patch -p1 < "$srcdir/999.patch"
+  patch -p1 < "$srcdir/1862.patch"
+  patch -p1 < "$srcdir/1744.patch"
+  patch -p1 < "$srcdir/1739.patch"
+  patch -p1 < "$srcdir/1980.patch"
+  patch -p1 < "$srcdir/no_Overview_left_Clock.patch"
+}
+
+
+build() {
+  arch-meson "$_pkgname" build \
+    -D gtk_doc=true \
+    -D tests=false
+  meson compile -C build
+}
+
+package() {
+  DESTDIR="$pkgdir" meson install -C build
+}
