@@ -34,6 +34,7 @@ source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=4bcd4a6fab16959900
         "0001-revert-MR-2173-no-new-gsettings-schema.patch"
         "0002-Mutter-Rounded-Blur-41.1-patch.patch"
         "0003-Fix-order-between-animations-and-blur.patch"
+        "0004-fix_rounded_clip_shader_code_no_gray_border.patch"
         "$_setting_src")
 sha256sums=('SKIP'
             '7f07bae4b95deb16020b64ea919a29c843dd19f62e8d49b458870cf81dbf8c70'
@@ -46,6 +47,7 @@ sha256sums=('SKIP'
             '443485f2d2cefb3f45e2d928d4fae1d0f0c7b6298c5d6c9469fe52d3da2ae668'
             '486edf8df3ed5ebd657ea2a2be7d4a8ef65ec9fa5d25469f47492daa795d6ab2'
             'b2f17d69e19d3b9f55af8c590446598fe4e08e60f3d75c9212c716497d7cd229'
+            'e16356e46f914c820764a7393df34963986a9206ddbe92c896897824169493f4'
             'cb356998626b4049c9f78ce64ef14b32e001229aa4b7da04f14378d15c3da26d')
 
 pkgver() {
@@ -65,6 +67,7 @@ prepare() {
   patch -p1 < "$srcdir/0001-revert-MR-2173-no-new-gsettings-schema.patch"
   patch -p1 < "$srcdir/0002-Mutter-Rounded-Blur-41.1-patch.patch"
   patch -p1 < "$srcdir/0003-Fix-order-between-animations-and-blur.patch"
+  patch -p1 < "$srcdir/0004-fix_rounded_clip_shader_code_no_gray_border.patch"
 }
 
 build() {

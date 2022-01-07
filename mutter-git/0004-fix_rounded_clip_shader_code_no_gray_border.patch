@@ -1,0 +1,19 @@
+--- a/src/shader.h	2022-01-06 21:16:31.393951131 -0500
++++ b/src/shader.h	2022-01-06 21:16:21.873699230 -0500
+@@ -103,12 +103,12 @@ ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
+ "                                               inner_corner_centers_1,   \n"\
+ "                                               inner_corner_centers_2,   \n"\
+ "                                               texture_coord);           \n"\
+-"    float border_alpha = clamp (outer_alpha - inner_alpha, 0.0, 1.0)     \n"\
++"    float border_alpha = clamp (outer_alpha - inner_alpha, 0.0, 0.2)     \n"\
+ "                       * cogl_color_out.a;                               \n"\
+ "                                                                         \n"\
+-"    cogl_color_out *= smoothstep (0.0, 0.6, inner_alpha);                \n"\
++"    cogl_color_out *= smoothstep (0.0, 0.2, inner_alpha);                \n"\
+ "    cogl_color_out = mix (cogl_color_out,                                \n"\
+-"                          vec4(vec3(0.65), 1.0),                         \n"\
++"                          vec4(vec3(0.1), 0.6),                         \n"\
+ "                          border_alpha);                                 \n"\
+ "  } else {                                                               \n"\
+ "    cogl_color_out = cogl_color_out * outer_alpha;                       \n"\
+
