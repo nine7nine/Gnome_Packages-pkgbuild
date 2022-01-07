@@ -4,7 +4,7 @@ Date: Thu, 6 Jan 2022 14:27:46 -0500
 Subject: [PATCH 3/3] Fix order between animations and blur
 
  - The Mutter-Rounded code is broken with animations. For whatever reason the
-   developer hooked thier function to remove blur into the
+   developer hooked their function to remove blur into the
    meta_window_actor_after_effects() function. meaning blur would be the last
    thing removed -- this looks awful and leads to blurred window artifacts.
 
@@ -68,7 +68,7 @@ index 0f7b82f27..6cd4a4836 100644
 +  if (!priv->blur_actor)
 +    return;
 +
-+  //ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  // hide the blur effect 
 +  clutter_actor_hide(priv->blur_actor);
 +}
 +
@@ -81,7 +81,7 @@ index 0f7b82f27..6cd4a4836 100644
 +  if (!priv->blur_actor)
 +    return;
 +
-+  //ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  // show the blur effect
 +  meta_shell_blur_effect_set_mode (priv->blur_effect, SHELL_BLUR_MODE_BACKGROUND);
 +  clutter_actor_add_effect_with_name (priv->blur_actor,
 +                                      "ShellBlurEffect",
