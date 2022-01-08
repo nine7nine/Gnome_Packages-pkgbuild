@@ -1,0 +1,190 @@
+From a895ff7dff6c76b405607e7c70af337f9ad5fd77 Mon Sep 17 00:00:00 2001
+From: waimus <16229430+waimus@users.noreply.github.com>
+Date: Sat, 8 Jan 2022 09:51:33 +0700
+Subject: [PATCH] make border brightness configurable
+
+Adding the border-brightness schema key to org.gnome.mutter schema, which modifies the border colour in src/shader.h
+---
+ data/org.gnome.mutter.gschema.xml.in |  6 ++++++
+ src/compositor/compositor.c          |  3 ++-
+ src/core/prefs.c                     | 20 +++++++++++++++++++-
+ src/meta/prefs.h                     |  4 ++++
+ src/meta_clip_effect.c               |  6 +++++-
+ src/shader.h                         |  5 +++--
+ 6 files changed, 39 insertions(+), 5 deletions(-)
+
+diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
+index eee73e7083..7ad3f3f359 100644
+--- a/data/org.gnome.mutter.gschema.xml.in
++++ b/data/org.gnome.mutter.gschema.xml.in
+@@ -31,6 +31,12 @@
+       <summary>Window border</summary>
+     </key>
+ 
++    <key name="border-brightness" type="i">
++      <default>40</default>
++      <range min="0" max="100"/>
++      <summary>Window border brightness</summary>
++    </key>
++
+     <key name="round-corners-radius" type="i">
+       <default>12</default>
+       <range min="2" max="100"/>
+diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
+index 50099ed121..c55366fb2b 100644
+--- a/src/compositor/compositor.c
++++ b/src/compositor/compositor.c
+@@ -1238,6 +1238,7 @@ prefs_changed_cb(MetaPreference pref,
+     case META_PREF_CORNER_RADIUS:
+     case META_PREF_CLIP_EDGE_PADDING:
+     case META_PREF_BORDER_WIDTH:
++    case META_PREF_BORDER_BRIGHTNESS:
+       if (pref == META_PREF_CLIP_EDGE_PADDING)
+         meta_window_actor_update_clip_padding (l->data);
+       
+@@ -1668,4 +1669,4 @@ void meta_compositor_update_blur_behind(MetaCompositor *compositor)
+       if (workspace == active_workspace)
+         meta_window_actor_set_blur_behind(l->data);
+     }
+-}
+\ No newline at end of file
++}
+diff --git a/src/core/prefs.c b/src/core/prefs.c
+index aaa3af5bbf..29bddc170b 100644
+--- a/src/core/prefs.c
++++ b/src/core/prefs.c
+@@ -124,6 +124,7 @@ static MetaButtonLayout button_layout;
+ 
+ static int round_corner_radius = 8;
+ static int border_width = 0;
++static int border_brightness = 40;
+ static int blur_sigmal = 20;
+ static int blur_window_opacity = 80;
+ static int blur_brightness = 100;
+@@ -569,6 +570,14 @@ static MetaIntPreference preferences_int[] =
+       },
+       &border_width,
+     },
++    {
++      {
++        "border-brightness",
++        SCHEMA_MUTTER,
++        META_PREF_BORDER_BRIGHTNESS,
++      },
++      &border_brightness,
++    },
+     {
+       {
+         "blur-sigmal",
+@@ -1925,6 +1934,9 @@ meta_preference_to_string (MetaPreference pref)
+     case META_PREF_BORDER_WIDTH:
+       return "BORDER_WIDTH";
+     
++    case META_PREF_BORDER_BRIGHTNESS:
++      return "BORDER_BRIGHTNESS";
++
+     case META_PREF_BLUR_SIGMAL:
+       return "BLUR_SIGMAL";
+ 
+@@ -2459,6 +2471,12 @@ meta_prefs_get_border_width(void)
+   return border_width;
+ }
+ 
++double
++meta_prefs_get_border_brightness(void)
++{
++  return (double) border_brightness * 0.01;
++}
++
+ int
+ meta_prefs_get_blur_sigmal(void)
+ {
+@@ -2488,4 +2506,4 @@ meta_prefs_in_blur_list(const char *name)
+     if (g_strcmp0(name, blur_list[i]) == 0)
+       return TRUE;
+   return FALSE;
+-}
+\ No newline at end of file
++}
+diff --git a/src/meta/prefs.h b/src/meta/prefs.h
+index 100980537d..7d5d8f3471 100644
+--- a/src/meta/prefs.h
++++ b/src/meta/prefs.h
+@@ -111,6 +111,7 @@ typedef enum
+   META_PREF_CLIP_EDGE_PADDING,
+   META_PREF_BLACK_LIST,
+   META_PREF_BORDER_WIDTH,
++  META_PREF_BORDER_BRIGHTNESS,
+   META_PREF_BLUR_SIGMAL,
+   META_PREF_BLUR_BRIGHTNESS,
+   META_PREF_BLUR_LIST,
+@@ -254,6 +255,9 @@ gboolean meta_prefs_in_black_list(const char *name);
+ META_EXPORT
+ int      meta_prefs_get_border_width(void);
+ 
++META_EXPORT
++double   meta_prefs_get_border_brightness(void);
++
+ META_EXPORT
+ int      meta_prefs_get_blur_sigmal(void);
+ 
+diff --git a/src/meta_clip_effect.c b/src/meta_clip_effect.c
+index 408eefde9d..931bd72226 100644
+--- a/src/meta_clip_effect.c
++++ b/src/meta_clip_effect.c
+@@ -128,6 +128,7 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
+   g_return_if_fail(priv->pipeline && priv->actor);
+   float radius = meta_prefs_get_round_corner_radius();
+   float border = meta_prefs_get_border_width();
++  float brightness = meta_prefs_get_border_brightness();
+ 
+   priv->bounds.x = _bounds->x + padding[0];
+   priv->bounds.y = _bounds->y + padding[2];
+@@ -160,6 +161,8 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
+     cogl_pipeline_get_uniform_location(priv->pipeline, "pixel_step");
+   int location_border_width =
+     cogl_pipeline_get_uniform_location(priv->pipeline, "border_width");
++  int location_border_brightness =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "border_brightness");
+ 
+ 
+   float bounds[] = { x1, y1, x2, y2 };
+@@ -215,6 +218,7 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
+                                   2, 1, pixel_step);
+   cogl_pipeline_set_uniform_1i(priv->pipeline, location_skip, 0);
+   cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_width, border);
++  cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_brightness, brightness);
+ }
+ 
+ void
+@@ -236,4 +240,4 @@ meta_clip_effect_get_bounds(MetaClipEffect        *effect,
+ {
+   MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(effect);
+   *bounds = priv->bounds;
+-}
+\ No newline at end of file
++}
+diff --git a/src/shader.h b/src/shader.h
+index ce06ad0b10..95ea686b00 100644
+--- a/src/shader.h
++++ b/src/shader.h
+@@ -82,7 +82,8 @@
+ "uniform vec4 inner_corner_centers_2;                                     \n"\
+ "uniform vec2 pixel_step;                                                 \n"\
+ "uniform int skip;                                                        \n"\
+-"uniform float border_width;                                              \n"
++"uniform float border_width;                                              \n"\
++"uniform float border_brightness;                                         \n"
+ 
+ /* used by src/meta_clip_effect.c  */
+ #define ROUNDED_CLIP_FRAGMENT_SHADER_DECLARATIONS                            \
+@@ -108,7 +109,7 @@ ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
+ "                                                                         \n"\
+ "    cogl_color_out *= smoothstep (0.0, 0.6, inner_alpha);                \n"\
+ "    cogl_color_out = mix (cogl_color_out,                                \n"\
+-"                          vec4(vec3(0.65), 1.0),                         \n"\
++"                          vec4(vec3(border_brightness), 1.0),            \n"\
+ "                          border_alpha);                                 \n"\
+ "  } else {                                                               \n"\
+ "    cogl_color_out = cogl_color_out * outer_alpha;                       \n"\
+
