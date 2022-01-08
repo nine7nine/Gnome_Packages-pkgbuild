@@ -1,9 +1,11 @@
-From a895ff7dff6c76b405607e7c70af337f9ad5fd77 Mon Sep 17 00:00:00 2001
+From e5d9671fdf3ad8e4fba0b0265c451c68d1f1767e Mon Sep 17 00:00:00 2001
 From: waimus <16229430+waimus@users.noreply.github.com>
 Date: Sat, 8 Jan 2022 09:51:33 +0700
 Subject: [PATCH] make border brightness configurable
 
 Adding the border-brightness schema key to org.gnome.mutter schema, which modifies the border colour in src/shader.h
+
+Signed-off-by: waimus <16229430+waimus@users.noreply.github.com>
 ---
  data/org.gnome.mutter.gschema.xml.in |  6 ++++++
  src/compositor/compositor.c          |  3 ++-
