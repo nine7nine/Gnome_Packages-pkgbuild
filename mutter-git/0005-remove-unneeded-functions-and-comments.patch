@@ -1,0 +1,44 @@
+From 266ba305d61265866191e424f9f1452f94dd5f4b Mon Sep 17 00:00:00 2001
+From: ninez <johnstonljordan@gmail.com>
+Date: Sat, 8 Jan 2022 00:48:37 -0500
+Subject: [PATCH] remove unneeded functions and comments
+
+ yilozt suggested on github to remove these bits, because;
+
+ "meta_shell_blur_effect_set_mode() and clutter_actor_add_effect_with_name() in 
+ this function can be removed, because priv->blur_actor has been added when 
+ window actor created."
+
+ done ;-)
+
+---
+ src/compositor/meta-window-actor.c | 6 ------
+ 1 file changed, 6 deletions(-)
+
+diff --git a/src/compositor/meta-window-actor.c b/src/compositor/meta-window-actor.c
+index 272881984..82547f73a 100644
+--- a/src/compositor/meta-window-actor.c
++++ b/src/compositor/meta-window-actor.c
+@@ -929,7 +929,6 @@ meta_window_actor_hide_blur (MetaWindowActor *self)
+   if (!priv->blur_actor)
+     return;
+ 
+-  // hide the blur effect 
+   clutter_actor_hide(priv->blur_actor);
+ }
+ 
+@@ -942,11 +941,6 @@ meta_window_actor_show_blur (MetaWindowActor *self)
+   if (!priv->blur_actor)
+     return;
+ 
+-  // show the blur effect
+-  meta_shell_blur_effect_set_mode (priv->blur_effect, SHELL_BLUR_MODE_BACKGROUND);
+-  clutter_actor_add_effect_with_name (priv->blur_actor,
+-                                      "ShellBlurEffect",
+-                                      CLUTTER_EFFECT(priv->blur_effect));
+     if (priv->visible && !priv->unminimize_in_progress)
+     clutter_actor_show(priv->blur_actor);
+ }
+-- 
+2.34.1
+
