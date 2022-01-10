@@ -35,6 +35,7 @@ source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=4bcd4a6fab16959900
         "0002-Mutter-Rounded-Blur-41.1-patch.patch"
         "0001-Fix-order-between-animations-and-blur.patch"
         "0004-make_border_brightness_configurable.patch"
+        "0007-Hide_blur_actor_when_window_openning.patch"
         "$_setting_src")
 sha256sums=('SKIP'
             '7f07bae4b95deb16020b64ea919a29c843dd19f62e8d49b458870cf81dbf8c70'
@@ -48,6 +49,7 @@ sha256sums=('SKIP'
             '486edf8df3ed5ebd657ea2a2be7d4a8ef65ec9fa5d25469f47492daa795d6ab2'
             '3e1720aac798cbeb86bdef22ce763c5482f66876ef9c8cc12ff1b18ba891e4c4'
             'f2ea52ea102841896102913683a688d9ec9b0dc442edf7403c60afbb4e80e075'
+            'ff471f55914134317906dd528df728c78548845a85b67872e5fc41890a3ddaf3'
             'cb356998626b4049c9f78ce64ef14b32e001229aa4b7da04f14378d15c3da26d')
 
 pkgver() {
@@ -68,6 +70,7 @@ prepare() {
   patch -p1 < "$srcdir/0002-Mutter-Rounded-Blur-41.1-patch.patch"
   patch -p1 < "$srcdir/0001-Fix-order-between-animations-and-blur.patch"
   patch -p1 < "$srcdir/0004-make_border_brightness_configurable.patch"
+  patch -p1 < "$srcdir/0007-Hide_blur_actor_when_window_openning.patch"
 }
 
 build() {
