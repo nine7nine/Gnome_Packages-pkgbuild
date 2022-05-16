@@ -1,0 +1,19 @@
+--- a/src/terminal-screen-container.cc	2019-09-24 09:51:40.574834553 -0400
++++ b/src/terminal-screen-container.cc	2019-09-24 09:51:22.274389411 -0400
+@@ -81,12 +81,12 @@
+   }
+ 
+   switch (corner) {
+-    case GTK_CORNER_TOP_LEFT:
+-    case GTK_CORNER_BOTTOM_LEFT:
+-      gtk_box_reorder_child (GTK_BOX (priv->hbox), priv->vscrollbar, -1);
+-      break;
+     case GTK_CORNER_TOP_RIGHT:
+     case GTK_CORNER_BOTTOM_RIGHT:
++      gtk_box_reorder_child (GTK_BOX (priv->hbox), priv->vscrollbar, -1);
++      break;
++    case GTK_CORNER_TOP_LEFT:
++    case GTK_CORNER_BOTTOM_LEFT:
+       gtk_box_reorder_child (GTK_BOX (priv->hbox), priv->vscrollbar, 0);
+       break;
+     default:
