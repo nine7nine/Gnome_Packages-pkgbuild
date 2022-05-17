@@ -2,6 +2,10 @@ README
 
 - Arch packages + patches that i use for gnome 42
 
-This build of Gnome-Shell disables Overview and adds some Performance-related MRs (merge requests).
+1). Gnome-Shell package disables Overview and adds some Performance-related MRs (merge requests).
+
+2). Mutter package adds performance related MRs and the mutter-rounded patches.
+
+3). Gnome-Terminal-Lefty package adds transparency and move the scrollbar to the left-side. 
 
 no support provided, as these are for personal use.
