@@ -20,9 +20,11 @@ checkdepends=(xorg-server-xvfb wireplumber python-dbusmock)
 options=(debug)
 _commit=94bd385bf3ece2a746d8755049fc1fa5c8c0a808  # tags/42.1^0
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
+        'mutter-blur-rounded_42.patch'
         'mr1441.patch'
         'mr1877.patch')
 sha256sums=('SKIP'
+            'ebdf06f40f114d02401f6cc7806bd3b55a3424d8640169d4affd1463479c5e7d'
             'c8e8e05f3b5ccf2faeeda45231bc12e4fff516c1e27f9d7a880a71eb00e5b0fa'
             '5284e17ac5cc129ecd21a0726d8159d44abc2e0da5dbcf195f2f05aab8e06120')
 
@@ -33,7 +35,8 @@ pkgver() {
 
 prepare() {
   cd mutter
-  
+
+  patch -p1 < "$srcdir/mutter-blur-rounded_42.patch"  
   patch -p1 < "$srcdir/mr1441.patch"
   patch -p1 < "$srcdir/mr1877.patch"
 }

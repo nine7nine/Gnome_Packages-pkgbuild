@@ -1,0 +1,4972 @@
+diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
+index c014b749fc..f5f77c05da 100644
+--- a/data/org.gnome.mutter.gschema.xml.in
++++ b/data/org.gnome.mutter.gschema.xml.in
+@@ -10,6 +10,84 @@
+   <schema id="org.gnome.mutter" path="/org/gnome/mutter/"
+           gettext-domain="@GETTEXT_DOMAIN@">
+ 
++    <key name="blur-sigmal" type="i">
++      <default>20</default>
++      <range min="0" max="100"/>
++      <summary>Blur sigmal</summary>
++    </key>
++
++    <key name="blur-brightness" type="i">
++      <default>100</default>
++      <range min="0" max="100"/>
++      <summary>Blur brightness</summary>
++    </key>
++
++    <key name="blur-list" type="as">
++      <default>[]</default>
++      <summary>windows will enable blur effect</summary>
++    </key>
++
++    <key name="blur-window-opacity" type="i">
++      <default>80</default>
++      <range min="0" max="100"/>
++      <summary>Blur brightness</summary>
++    </key>
++
++    <key name="border-width" type="i">
++      <default>0</default>
++      <range min="0" max="100"/>
++      <summary>Window border</summary>
++    </key>
++
++    <key name="border-brightness" type="i">
++      <default>40</default>
++      <range min="0" max="100"/>
++      <summary>Window border brightness</summary>
++    </key>
++
++    <key name="round-corners-radius" type="i">
++      <default>12</default>
++      <range min="2" max="100"/>
++      <summary>Round Corners Radius</summary>
++    </key>
++
++    <key name="clip-edge-padding" type="s">
++      <default>"{\"global\": [0, 0, 0, 0], \"apps\": {}}"</default>
++      <summary>padding of window will be clipped</summary>
++      <description>
++        A JSON string, Represents the clipping range of the window edge.
++        The array represents the clipping range of the four sides (left,
++        right, top, bottom) of the window.
++        
++        The key of "apps" object represent the instance part of the window's
++        `WM_CLASS` property, as same as the output of `xprop WM_CLASS|cut -d 
++        \" -f 2`
++
++        This is a example:
++
++          {
++            'global': [1, 2, 3, 4],
++            'apps': {
++              'code': [5, 6, 7, 8],
++              'typora': [9, 10, 11, 12]
++            }
++          }
++
++        For all window, cut the left, right, top and bottom sides by 1, 2
++        , 3 and 4 pixels respectively. But for Visual Studio Code and
++        Typora, we will cut different pixels.        
++      </description>
++    </key>
++
++    <key name="black-list" type="as">
++      <default>["qq.exe", "tim.exe"]</default>
++      <summary>window here will not be rounded</summary>
++      <description>
++        The contents of the list represent the instance part of the window's
++        `WM_CLASS`, as same as the output of `xprop WM_CLASS|cut -d \" -f 2`
++      </description>
++    </key>
++
+     <key name="overlay-key" type="s">
+       <default>'Super_L'</default>
+       <summary>Modifier to use for extended window management operations</summary>
+diff --git a/scripts/blur_get/get.sh b/scripts/blur_get/get.sh
+new file mode 100755
+index 0000000000..fab523fa3a
+--- /dev/null
++++ b/scripts/blur_get/get.sh
+@@ -0,0 +1,8 @@
++#!/bin/bash
++ver="41.3"
++
++cd $(dirname $0)
++
++rm *.[ch]
++wget https://gitlab.gnome.org/GNOME/gnome-shell/-/raw/${ver}/src/shell-blur-effect.c
++wget https://gitlab.gnome.org/GNOME/gnome-shell/-/raw/${ver}/src/shell-blur-effect.h
+\ No newline at end of file
+diff --git a/scripts/blur_get/shell-blur-effect.c b/scripts/blur_get/shell-blur-effect.c
+new file mode 100644
+index 0000000000..8ea333f0cf
+--- /dev/null
++++ b/scripts/blur_get/shell-blur-effect.c
+@@ -0,0 +1,907 @@
++/* shell-blur-effect.c
++ *
++ * Copyright 2019 Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#include "shell-blur-effect.h"
++
++#include "shell-enum-types.h"
++
++/**
++ * SECTION:shell-blur-effect
++ * @short_description: Blur effect for actors
++ *
++ * #ShellBlurEffect is a blur implementation based on Clutter. It also has
++ * an optional brightness property.
++ *
++ * # Modes
++ *
++ * #ShellBlurEffect can work in @SHELL_BLUR_MODE_BACKGROUND and @SHELL_BLUR_MODE_ACTOR
++ * modes. The actor mode blurs the actor itself, and all of its children. The
++ * background mode blurs the pixels beneath the actor, but not the actor itself.
++ *
++ * @SHELL_BLUR_MODE_BACKGROUND can be computationally expensive, since the contents
++ * beneath the actor cannot be cached, so beware of the performance implications
++ * of using this blur mode.
++ */
++
++static const gchar *brightness_glsl_declarations =
++"uniform float brightness;                                                 \n";
++
++static const gchar *brightness_glsl =
++"  cogl_color_out.rgb *= brightness;                                       \n";
++
++#define MIN_DOWNSCALE_SIZE 256.f
++#define MAX_SIGMA 6.f
++
++typedef enum
++{
++  ACTOR_PAINTED = 1 << 0,
++  BLUR_APPLIED = 1 << 1,
++} CacheFlags;
++
++typedef struct
++{
++  CoglFramebuffer *framebuffer;
++  CoglPipeline *pipeline;
++  CoglTexture *texture;
++} FramebufferData;
++
++struct _ShellBlurEffect
++{
++  ClutterEffect parent_instance;
++
++  ClutterActor *actor;
++
++  unsigned int tex_width;
++  unsigned int tex_height;
++
++  /* The cached contents */
++  FramebufferData actor_fb;
++  CacheFlags cache_flags;
++
++  FramebufferData background_fb;
++  FramebufferData brightness_fb;
++  int brightness_uniform;
++
++  ShellBlurMode mode;
++  float downscale_factor;
++  float brightness;
++  int sigma;
++};
++
++G_DEFINE_TYPE (ShellBlurEffect, shell_blur_effect, CLUTTER_TYPE_EFFECT)
++
++enum {
++  PROP_0,
++  PROP_SIGMA,
++  PROP_BRIGHTNESS,
++  PROP_MODE,
++  N_PROPS
++};
++
++static GParamSpec *properties [N_PROPS] = { NULL, };
++
++static CoglPipeline*
++create_base_pipeline (void)
++{
++  static CoglPipeline *base_pipeline = NULL;
++
++  if (G_UNLIKELY (base_pipeline == NULL))
++    {
++      CoglContext *ctx =
++        clutter_backend_get_cogl_context (clutter_get_default_backend ());
++
++      base_pipeline = cogl_pipeline_new (ctx);
++      cogl_pipeline_set_layer_null_texture (base_pipeline, 0);
++      cogl_pipeline_set_layer_filters (base_pipeline,
++                                       0,
++                                       COGL_PIPELINE_FILTER_LINEAR,
++                                       COGL_PIPELINE_FILTER_LINEAR);
++      cogl_pipeline_set_layer_wrap_mode (base_pipeline,
++                                         0,
++                                         COGL_PIPELINE_WRAP_MODE_CLAMP_TO_EDGE);
++    }
++
++  return cogl_pipeline_copy (base_pipeline);
++}
++
++static CoglPipeline*
++create_brightness_pipeline (void)
++{
++  static CoglPipeline *brightness_pipeline = NULL;
++
++  if (G_UNLIKELY (brightness_pipeline == NULL))
++    {
++      CoglSnippet *snippet;
++
++      brightness_pipeline = create_base_pipeline ();
++
++      snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_FRAGMENT,
++                                  brightness_glsl_declarations,
++                                  brightness_glsl);
++      cogl_pipeline_add_snippet (brightness_pipeline, snippet);
++      cogl_object_unref (snippet);
++    }
++
++  return cogl_pipeline_copy (brightness_pipeline);
++}
++
++
++static void
++update_brightness (ShellBlurEffect *self,
++                   uint8_t          paint_opacity)
++{
++  cogl_pipeline_set_color4ub (self->brightness_fb.pipeline,
++                              paint_opacity,
++                              paint_opacity,
++                              paint_opacity,
++                              paint_opacity);
++
++  if (self->brightness_uniform > -1)
++    {
++      cogl_pipeline_set_uniform_1f (self->brightness_fb.pipeline,
++                                    self->brightness_uniform,
++                                    self->brightness);
++    }
++}
++
++static void
++setup_projection_matrix (CoglFramebuffer *framebuffer,
++                         float            width,
++                         float            height)
++{
++  graphene_matrix_t projection;
++
++  graphene_matrix_init_translate (&projection,
++                                  &GRAPHENE_POINT3D_INIT (-width / 2.0,
++                                                          -height / 2.0,
++                                                          0.f));
++  graphene_matrix_scale (&projection, 2.0 / width, -2.0 / height, 1.f);
++
++  cogl_framebuffer_set_projection_matrix (framebuffer, &projection);
++}
++
++static gboolean
++update_fbo (FramebufferData *data,
++            unsigned int     width,
++            unsigned int     height,
++            float            downscale_factor)
++{
++  CoglContext *ctx =
++    clutter_backend_get_cogl_context (clutter_get_default_backend ());
++
++  g_clear_pointer (&data->texture, cogl_object_unref);
++  g_clear_object (&data->framebuffer);
++
++  float new_width = floorf (width / downscale_factor);
++  float new_height = floorf (height / downscale_factor);
++
++  data->texture = cogl_texture_2d_new_with_size (ctx, new_width, new_height);
++  if (!data->texture)
++    return FALSE;
++
++  cogl_pipeline_set_layer_texture (data->pipeline, 0, data->texture);
++
++  data->framebuffer =
++    COGL_FRAMEBUFFER (cogl_offscreen_new_with_texture (data->texture));
++  if (!data->framebuffer)
++    {
++      g_warning ("%s: Unable to create an Offscreen buffer", G_STRLOC);
++      return FALSE;
++    }
++
++  setup_projection_matrix (data->framebuffer, new_width, new_height);
++
++  return TRUE;
++}
++
++static gboolean
++update_actor_fbo (ShellBlurEffect *self,
++                  unsigned int     width,
++                  unsigned int     height,
++                  float            downscale_factor)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->downscale_factor == downscale_factor &&
++      self->actor_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  self->cache_flags &= ~ACTOR_PAINTED;
++
++  return update_fbo (&self->actor_fb, width, height, downscale_factor);
++}
++
++static gboolean
++update_brightness_fbo (ShellBlurEffect *self,
++                       unsigned int     width,
++                       unsigned int     height,
++                       float            downscale_factor)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->downscale_factor == downscale_factor &&
++      self->brightness_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  return update_fbo (&self->brightness_fb,
++                     width, height,
++                     downscale_factor);
++}
++
++static gboolean
++update_background_fbo (ShellBlurEffect *self,
++                       unsigned int     width,
++                       unsigned int     height)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->background_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  return update_fbo (&self->background_fb, width, height, 1.0);
++}
++
++static void
++clear_framebuffer_data (FramebufferData *fb_data)
++{
++  g_clear_pointer (&fb_data->texture, cogl_object_unref);
++  g_clear_object (&fb_data->framebuffer);
++}
++
++static float
++calculate_downscale_factor (float width,
++                            float height,
++                            float sigma)
++{
++  float downscale_factor = 1.0;
++  float scaled_width = width;
++  float scaled_height = height;
++  float scaled_sigma = sigma;
++
++  /* This is the algorithm used by Firefox; keep downscaling until either the
++   * blur radius is lower than the threshold, or the downscaled texture is too
++   * small.
++   */
++  while (scaled_sigma > MAX_SIGMA &&
++         scaled_width > MIN_DOWNSCALE_SIZE &&
++         scaled_height > MIN_DOWNSCALE_SIZE)
++    {
++      downscale_factor *= 2.f;
++
++      scaled_width = width / downscale_factor;
++      scaled_height = height / downscale_factor;
++      scaled_sigma = sigma / downscale_factor;
++    }
++
++  return downscale_factor;
++}
++
++static void
++shell_blur_effect_set_actor (ClutterActorMeta *meta,
++                             ClutterActor     *actor)
++{
++  ShellBlurEffect *self = SHELL_BLUR_EFFECT (meta);
++  ClutterActorMetaClass *meta_class;
++
++  meta_class = CLUTTER_ACTOR_META_CLASS (shell_blur_effect_parent_class);
++  meta_class->set_actor (meta, actor);
++
++  /* clear out the previous state */
++  clear_framebuffer_data (&self->actor_fb);
++  clear_framebuffer_data (&self->background_fb);
++  clear_framebuffer_data (&self->brightness_fb);
++
++  /* we keep a back pointer here, to avoid going through the ActorMeta */
++  self->actor = clutter_actor_meta_get_actor (meta);
++}
++
++static void
++update_actor_box (ShellBlurEffect     *self,
++                  ClutterPaintContext *paint_context,
++                  ClutterActorBox     *source_actor_box)
++{
++  ClutterStageView *stage_view;
++  float box_scale_factor = 1.0f;
++  float origin_x, origin_y;
++  float width, height;
++
++  switch (self->mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      clutter_actor_get_allocation_box (self->actor, source_actor_box);
++      break;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++      stage_view = clutter_paint_context_get_stage_view (paint_context);
++
++      clutter_actor_get_transformed_position (self->actor, &origin_x, &origin_y);
++      clutter_actor_get_transformed_size (self->actor, &width, &height);
++
++      if (stage_view)
++        {
++          cairo_rectangle_int_t stage_view_layout;
++
++          box_scale_factor = clutter_stage_view_get_scale (stage_view);
++          clutter_stage_view_get_layout (stage_view, &stage_view_layout);
++
++          origin_x -= stage_view_layout.x;
++          origin_y -= stage_view_layout.y;
++        }
++      else
++        {
++          /* If we're drawing off stage, just assume scale = 1, this won't work
++           * with stage-view scaling though.
++           */
++        }
++
++      clutter_actor_box_set_origin (source_actor_box, origin_x, origin_y);
++      clutter_actor_box_set_size (source_actor_box, width, height);
++
++      clutter_actor_box_scale (source_actor_box, box_scale_factor);
++      break;
++    }
++
++  clutter_actor_box_clamp_to_pixel (source_actor_box);
++}
++
++static void
++add_blurred_pipeline (ShellBlurEffect  *self,
++                      ClutterPaintNode *node,
++                      uint8_t           paint_opacity)
++{
++  g_autoptr (ClutterPaintNode) pipeline_node = NULL;
++  float width, height;
++
++  /* Use the untransformed actor size here, since the framebuffer itself already
++   * has the actor transform matrix applied.
++   */
++  clutter_actor_get_size (self->actor, &width, &height);
++
++  update_brightness (self, paint_opacity);
++
++  pipeline_node = clutter_pipeline_node_new (self->brightness_fb.pipeline);
++  clutter_paint_node_set_static_name (pipeline_node, "ShellBlurEffect (final)");
++  clutter_paint_node_add_child (node, pipeline_node);
++
++  clutter_paint_node_add_rectangle (pipeline_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      width,
++                                      height,
++                                    });
++}
++
++static ClutterPaintNode *
++create_blur_nodes (ShellBlurEffect  *self,
++                   ClutterPaintNode *node,
++                   uint8_t           paint_opacity)
++{
++  g_autoptr (ClutterPaintNode) brightness_node = NULL;
++  g_autoptr (ClutterPaintNode) blur_node = NULL;
++  float width;
++  float height;
++
++  clutter_actor_get_size (self->actor, &width, &height);
++
++  update_brightness (self, paint_opacity);
++  brightness_node = clutter_layer_node_new_to_framebuffer (self->brightness_fb.framebuffer,
++                                                           self->brightness_fb.pipeline);
++  clutter_paint_node_set_static_name (brightness_node, "ShellBlurEffect (brightness)");
++  clutter_paint_node_add_child (node, brightness_node);
++  clutter_paint_node_add_rectangle (brightness_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      width, height,
++                                    });
++
++  blur_node = clutter_blur_node_new (self->tex_width / self->downscale_factor,
++                                     self->tex_height / self->downscale_factor,
++                                     self->sigma / self->downscale_factor);
++  clutter_paint_node_set_static_name (blur_node, "ShellBlurEffect (blur)");
++  clutter_paint_node_add_child (brightness_node, blur_node);
++  clutter_paint_node_add_rectangle (blur_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      cogl_texture_get_width (self->brightness_fb.texture),
++                                      cogl_texture_get_height (self->brightness_fb.texture),
++                                    });
++
++  self->cache_flags |= BLUR_APPLIED;
++
++  return g_steal_pointer (&blur_node);
++}
++
++static void
++paint_background (ShellBlurEffect     *self,
++                  ClutterPaintNode    *node,
++                  ClutterPaintContext *paint_context,
++                  ClutterActorBox     *source_actor_box)
++{
++  g_autoptr (ClutterPaintNode) background_node = NULL;
++  g_autoptr (ClutterPaintNode) blit_node = NULL;
++  CoglFramebuffer *src;
++  float transformed_x;
++  float transformed_y;
++  float transformed_width;
++  float transformed_height;
++
++  clutter_actor_box_get_origin (source_actor_box,
++                                &transformed_x,
++                                &transformed_y);
++  clutter_actor_box_get_size (source_actor_box,
++                              &transformed_width,
++                              &transformed_height);
++
++  /* Background layer node */
++  background_node =
++    clutter_layer_node_new_to_framebuffer (self->background_fb.framebuffer,
++                                           self->background_fb.pipeline);
++  clutter_paint_node_set_static_name (background_node, "ShellBlurEffect (background)");
++  clutter_paint_node_add_child (node, background_node);
++  clutter_paint_node_add_rectangle (background_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      self->tex_width / self->downscale_factor,
++                                      self->tex_height / self->downscale_factor,
++                                    });
++
++  /* Blit node */
++  src = clutter_paint_context_get_framebuffer (paint_context);
++  blit_node = clutter_blit_node_new (src);
++  clutter_paint_node_set_static_name (blit_node, "ShellBlurEffect (blit)");
++  clutter_paint_node_add_child (background_node, blit_node);
++  clutter_blit_node_add_blit_rectangle (CLUTTER_BLIT_NODE (blit_node),
++                                        transformed_x,
++                                        transformed_y,
++                                        0, 0,
++                                        transformed_width,
++                                        transformed_height);
++}
++
++static gboolean
++update_framebuffers (ShellBlurEffect     *self,
++                     ClutterPaintContext *paint_context,
++                     ClutterActorBox     *source_actor_box)
++{
++  gboolean updated = FALSE;
++  float downscale_factor;
++  float height = -1;
++  float width = -1;
++
++  clutter_actor_box_get_size (source_actor_box, &width, &height);
++
++  downscale_factor = calculate_downscale_factor (width, height, self->sigma);
++
++  updated = update_actor_fbo (self, width, height, downscale_factor) &&
++            update_brightness_fbo (self, width, height, downscale_factor);
++
++  if (self->mode == SHELL_BLUR_MODE_BACKGROUND)
++    updated = updated && update_background_fbo (self, width, height);
++
++  self->tex_width = width;
++  self->tex_height = height;
++  self->downscale_factor = downscale_factor;
++
++  return updated;
++}
++
++static void
++add_actor_node (ShellBlurEffect  *self,
++                ClutterPaintNode *node,
++                int               opacity)
++{
++  g_autoptr (ClutterPaintNode) actor_node = NULL;
++
++  actor_node = clutter_actor_node_new (self->actor, opacity);
++  clutter_paint_node_add_child (node, actor_node);
++}
++
++static void
++paint_actor_offscreen (ShellBlurEffect         *self,
++                       ClutterPaintNode        *node,
++                       ClutterEffectPaintFlags  flags)
++{
++  gboolean actor_dirty;
++
++  actor_dirty = (flags & CLUTTER_EFFECT_PAINT_ACTOR_DIRTY) != 0;
++
++  /* The actor offscreen framebuffer is updated already */
++  if (actor_dirty || !(self->cache_flags & ACTOR_PAINTED))
++    {
++      g_autoptr (ClutterPaintNode) transform_node = NULL;
++      g_autoptr (ClutterPaintNode) layer_node = NULL;
++      graphene_matrix_t transform;
++
++      /* Layer node */
++      layer_node = clutter_layer_node_new_to_framebuffer (self->actor_fb.framebuffer,
++                                                          self->actor_fb.pipeline);
++      clutter_paint_node_set_static_name (layer_node, "ShellBlurEffect (actor offscreen)");
++      clutter_paint_node_add_child (node, layer_node);
++      clutter_paint_node_add_rectangle (layer_node,
++                                        &(ClutterActorBox) {
++                                          0.f, 0.f,
++                                          self->tex_width / self->downscale_factor,
++                                          self->tex_height / self->downscale_factor,
++                                        });
++
++      /* Transform node */
++      graphene_matrix_init_scale (&transform,
++                                  1.f / self->downscale_factor,
++                                  1.f / self->downscale_factor,
++                                  1.f);
++      transform_node = clutter_transform_node_new (&transform);
++      clutter_paint_node_set_static_name (transform_node, "ShellBlurEffect (downscale)");
++      clutter_paint_node_add_child (layer_node, transform_node);
++
++      /* Actor node */
++      add_actor_node (self, transform_node, 255);
++
++      self->cache_flags |= ACTOR_PAINTED;
++    }
++  else
++    {
++      g_autoptr (ClutterPaintNode) pipeline_node = NULL;
++
++      pipeline_node = clutter_pipeline_node_new (self->actor_fb.pipeline);
++      clutter_paint_node_set_static_name (pipeline_node,
++                                          "ShellBlurEffect (actor texture)");
++      clutter_paint_node_add_child (node, pipeline_node);
++      clutter_paint_node_add_rectangle (pipeline_node,
++                                        &(ClutterActorBox) {
++                                          0.f, 0.f,
++                                          self->tex_width / self->downscale_factor,
++                                          self->tex_height / self->downscale_factor,
++                                        });
++    }
++}
++
++static gboolean
++needs_repaint (ShellBlurEffect         *self,
++               ClutterEffectPaintFlags  flags)
++{
++  gboolean actor_cached;
++  gboolean blur_cached;
++  gboolean actor_dirty;
++
++  actor_dirty = (flags & CLUTTER_EFFECT_PAINT_ACTOR_DIRTY) != 0;
++  blur_cached = (self->cache_flags & BLUR_APPLIED) != 0;
++  actor_cached = (self->cache_flags & ACTOR_PAINTED) != 0;
++
++  switch (self->mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      return actor_dirty || !blur_cached || !actor_cached;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++      return TRUE;
++    }
++
++  return TRUE;
++}
++
++static void
++shell_blur_effect_paint_node (ClutterEffect           *effect,
++                              ClutterPaintNode        *node,
++                              ClutterPaintContext     *paint_context,
++                              ClutterEffectPaintFlags  flags)
++{
++  ShellBlurEffect *self = SHELL_BLUR_EFFECT (effect);
++  uint8_t paint_opacity;
++
++  g_assert (self->actor != NULL);
++
++  if (self->sigma > 0)
++    {
++      g_autoptr (ClutterPaintNode) blur_node = NULL;
++
++      switch (self->mode)
++        {
++        case SHELL_BLUR_MODE_ACTOR:
++          paint_opacity = clutter_actor_get_paint_opacity (self->actor);
++          break;
++
++        case SHELL_BLUR_MODE_BACKGROUND:
++          paint_opacity = 255;
++          break;
++
++        default:
++          g_assert_not_reached();
++          break;
++        }
++
++      if (needs_repaint (self, flags))
++        {
++          ClutterActorBox source_actor_box;
++
++          update_actor_box (self, paint_context, &source_actor_box);
++
++          /* Failing to create or update the offscreen framebuffers prevents
++           * the entire effect to be applied.
++           */
++          if (!update_framebuffers (self, paint_context, &source_actor_box))
++            goto fail;
++
++          blur_node = create_blur_nodes (self, node, paint_opacity);
++
++          switch (self->mode)
++            {
++            case SHELL_BLUR_MODE_ACTOR:
++              paint_actor_offscreen (self, blur_node, flags);
++              break;
++
++            case SHELL_BLUR_MODE_BACKGROUND:
++              paint_background (self, blur_node, paint_context, &source_actor_box);
++              break;
++            }
++        }
++      else
++        {
++          /* Use the cached pipeline if no repaint is needed */
++          add_blurred_pipeline (self, node, paint_opacity);
++        }
++
++      /* Background blur needs to paint the actor after painting the blurred
++       * background.
++       */
++      switch (self->mode)
++        {
++        case SHELL_BLUR_MODE_ACTOR:
++          break;
++
++        case SHELL_BLUR_MODE_BACKGROUND:
++          add_actor_node (self, node, -1);
++          break;
++        }
++
++      return;
++    }
++
++fail:
++  /* When no blur is applied, or the offscreen framebuffers
++   * couldn't be created, fallback to simply painting the actor.
++   */
++  add_actor_node (self, node, -1);
++}
++
++static void
++shell_blur_effect_finalize (GObject *object)
++{
++  ShellBlurEffect *self = (ShellBlurEffect *)object;
++
++  clear_framebuffer_data (&self->actor_fb);
++  clear_framebuffer_data (&self->background_fb);
++  clear_framebuffer_data (&self->brightness_fb);
++
++  g_clear_pointer (&self->actor_fb.pipeline, cogl_object_unref);
++  g_clear_pointer (&self->background_fb.pipeline, cogl_object_unref);
++  g_clear_pointer (&self->brightness_fb.pipeline, cogl_object_unref);
++
++  G_OBJECT_CLASS (shell_blur_effect_parent_class)->finalize (object);
++}
++
++static void
++shell_blur_effect_get_property (GObject    *object,
++                                guint       prop_id,
++                                GValue     *value,
++                                GParamSpec *pspec)
++{
++  ShellBlurEffect *self = SHELL_BLUR_EFFECT (object);
++
++  switch (prop_id)
++    {
++    case PROP_SIGMA:
++      g_value_set_int (value, self->sigma);
++      break;
++
++    case PROP_BRIGHTNESS:
++      g_value_set_float (value, self->brightness);
++      break;
++
++    case PROP_MODE:
++      g_value_set_enum (value, self->mode);
++      break;
++
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++shell_blur_effect_set_property (GObject      *object,
++                                guint         prop_id,
++                                const GValue *value,
++                                GParamSpec   *pspec)
++{
++  ShellBlurEffect *self = SHELL_BLUR_EFFECT (object);
++
++  switch (prop_id)
++    {
++    case PROP_SIGMA:
++      shell_blur_effect_set_sigma (self, g_value_get_int (value));
++      break;
++
++    case PROP_BRIGHTNESS:
++      shell_blur_effect_set_brightness (self, g_value_get_float (value));
++      break;
++
++    case PROP_MODE:
++      shell_blur_effect_set_mode (self, g_value_get_enum (value));
++      break;
++
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++shell_blur_effect_class_init (ShellBlurEffectClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++  ClutterActorMetaClass *meta_class = CLUTTER_ACTOR_META_CLASS (klass);
++  ClutterEffectClass *effect_class = CLUTTER_EFFECT_CLASS (klass);
++
++  object_class->finalize = shell_blur_effect_finalize;
++  object_class->get_property = shell_blur_effect_get_property;
++  object_class->set_property = shell_blur_effect_set_property;
++
++  meta_class->set_actor = shell_blur_effect_set_actor;
++
++  effect_class->paint_node = shell_blur_effect_paint_node;
++
++  properties[PROP_SIGMA] =
++    g_param_spec_int ("sigma",
++                      "Sigma",
++                      "Sigma",
++                      0, G_MAXINT, 0,
++                      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  properties[PROP_BRIGHTNESS] =
++    g_param_spec_float ("brightness",
++                        "Brightness",
++                        "Brightness",
++                        0.f, 1.f, 1.f,
++                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  properties[PROP_MODE] =
++    g_param_spec_enum ("mode",
++                       "Blur mode",
++                       "Blur mode",
++                       SHELL_TYPE_BLUR_MODE,
++                       SHELL_BLUR_MODE_ACTOR,
++                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, N_PROPS, properties);
++}
++
++static void
++shell_blur_effect_init (ShellBlurEffect *self)
++{
++  self->mode = SHELL_BLUR_MODE_ACTOR;
++  self->sigma = 0;
++  self->brightness = 1.f;
++
++  self->actor_fb.pipeline = create_base_pipeline ();
++  self->background_fb.pipeline = create_base_pipeline ();
++  self->brightness_fb.pipeline = create_brightness_pipeline ();
++  self->brightness_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "brightness");
++}
++
++ShellBlurEffect *
++shell_blur_effect_new (void)
++{
++  return g_object_new (SHELL_TYPE_BLUR_EFFECT, NULL);
++}
++
++int
++shell_blur_effect_get_sigma (ShellBlurEffect *self)
++{
++  g_return_val_if_fail (SHELL_IS_BLUR_EFFECT (self), -1);
++
++  return self->sigma;
++}
++
++void
++shell_blur_effect_set_sigma (ShellBlurEffect *self,
++                             int              sigma)
++{
++  g_return_if_fail (SHELL_IS_BLUR_EFFECT (self));
++
++  if (self->sigma == sigma)
++    return;
++
++  self->sigma = sigma;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_SIGMA]);
++}
++
++float
++shell_blur_effect_get_brightness (ShellBlurEffect *self)
++{
++  g_return_val_if_fail (SHELL_IS_BLUR_EFFECT (self), FALSE);
++
++  return self->brightness;
++}
++
++void
++shell_blur_effect_set_brightness (ShellBlurEffect *self,
++                                  float            brightness)
++{
++  g_return_if_fail (SHELL_IS_BLUR_EFFECT (self));
++
++  if (self->brightness == brightness)
++    return;
++
++  self->brightness = brightness;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_BRIGHTNESS]);
++}
++
++ShellBlurMode
++shell_blur_effect_get_mode (ShellBlurEffect *self)
++{
++  g_return_val_if_fail (SHELL_IS_BLUR_EFFECT (self), -1);
++
++  return self->mode;
++}
++
++void
++shell_blur_effect_set_mode (ShellBlurEffect *self,
++                            ShellBlurMode    mode)
++{
++  g_return_if_fail (SHELL_IS_BLUR_EFFECT (self));
++
++  if (self->mode == mode)
++    return;
++
++  self->mode = mode;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  switch (mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      clear_framebuffer_data (&self->background_fb);
++      break;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++    default:
++      /* Do nothing */
++      break;
++    }
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_MODE]);
++}
+diff --git a/scripts/blur_get/shell-blur-effect.h b/scripts/blur_get/shell-blur-effect.h
+new file mode 100644
+index 0000000000..a7486ccde0
+--- /dev/null
++++ b/scripts/blur_get/shell-blur-effect.h
+@@ -0,0 +1,57 @@
++/* shell-blur-effect.h
++ *
++ * Copyright 2019 Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#pragma once
++
++#include <clutter/clutter.h>
++
++G_BEGIN_DECLS
++
++/**
++ * ShellBlurMode:
++ * @SHELL_BLUR_MODE_ACTOR: blur the actor contents, and its children
++ * @SHELL_BLUR_MODE_BACKGROUND: blur what's beneath the actor
++ *
++ * The mode of blurring of the effect.
++ */
++typedef enum
++{
++  SHELL_BLUR_MODE_ACTOR,
++  SHELL_BLUR_MODE_BACKGROUND,
++} ShellBlurMode;
++
++#define SHELL_TYPE_BLUR_EFFECT (shell_blur_effect_get_type())
++G_DECLARE_FINAL_TYPE (ShellBlurEffect, shell_blur_effect, SHELL, BLUR_EFFECT, ClutterEffect)
++
++ShellBlurEffect *shell_blur_effect_new (void);
++
++int shell_blur_effect_get_sigma (ShellBlurEffect *self);
++void shell_blur_effect_set_sigma (ShellBlurEffect *self,
++                                  int              sigma);
++
++float shell_blur_effect_get_brightness (ShellBlurEffect *self);
++void shell_blur_effect_set_brightness (ShellBlurEffect *self,
++                                       float            brightness);
++
++ShellBlurMode shell_blur_effect_get_mode (ShellBlurEffect *self);
++void shell_blur_effect_set_mode (ShellBlurEffect *self,
++                                 ShellBlurMode    mode);
++
++G_END_DECLS
+diff --git a/scripts/build b/scripts/build
+new file mode 100755
+index 0000000000..8b97636f76
+--- /dev/null
++++ b/scripts/build
+@@ -0,0 +1,25 @@
++#!/bin/bash
++
++work_dir=$(cd $(dirname $0); cd ../; pwd)
++libdir="/usr/local/lib/mutter-10/plugins/"
++
++cd $work_dir
++
++mkdir -p build compile
++
++cd build
++if [ -z "$(ls -A .)" ]; then
++  meson ../
++fi
++
++ninja && meson install --destdir=${work_dir}/compile
++
++if [[ ! -d $libdir ]]; then
++  # We need to copy libdefault.so to /usr/local/lib
++  # to run mutter we build
++  sudo mkdir -p $libdir
++  sudo cp $work_dir/compile/$libdir/libdefault.so $libdir
++fi
++
++sudo cp $work_dir/compile/usr/local/share/glib-2.0/schemas/* /usr/share/glib-2.0/schemas/
++sudo glib-compile-schemas /usr/share/glib-2.0/schemas
+\ No newline at end of file
+diff --git a/scripts/genpatch b/scripts/genpatch
+new file mode 100755
+index 0000000000..3ec4578df5
+--- /dev/null
++++ b/scripts/genpatch
+@@ -0,0 +1,27 @@
++#!/bin/bash
++
++ver=41.3
++
++cd $(dirname $0)
++
++rm -rf ../patches
++mkdir -p ../patches
++
++mkdir -p tmp/a/src
++mkdir -p tmp/b/src
++cp blur_get/*.[ch] tmp/a/src
++cp ../src/shell-blur-effect.[ch] tmp/b/src
++
++cd tmp
++diff -Narup a b > ../../patches/shell_blur_effect_${ver}.patch
++cd ..
++rm -rf tmp
++
++cd ..
++
++git config diff.nodiff.command true
++git diff ${ver} > ./patches/rounded_corners_${ver}.patch
++git config --unset diff.nodiff.command
++
++cp src/shader.h ./patches
++cp src/meta_clip_effect.[ch] ./patches
+\ No newline at end of file
+diff --git a/scripts/test b/scripts/test
+new file mode 100755
+index 0000000000..568ceee52c
+--- /dev/null
++++ b/scripts/test
+@@ -0,0 +1,26 @@
++_check() (
++  mkdir -p -m 700 "${XDG_RUNTIME_DIR:=$PWD/runtime-dir}"
++  glib-compile-schemas "${GSETTINGS_SCHEMA_DIR:=$PWD/build/data}"
++  export XDG_RUNTIME_DIR GSETTINGS_SCHEMA_DIR
++
++  pipewire &
++  _p1=$!
++
++  pipewire-media-session &
++  _p2=$!
++
++  trap "kill $_p1 $_p2; wait" EXIT
++
++  meson test -C build --print-errorlogs "normal"
++)
++
++check() {
++  cd $(dirname $0)
++  cd ../
++
++  dbus-run-session xvfb-run \
++    -s '-screen 0 1920x1080x24 -nolisten local +iglx -noreset' \
++    bash -c "$(declare -f _check); _check"
++}
++
++check
+\ No newline at end of file
+diff --git a/src/compositor/compositor-private.h b/src/compositor/compositor-private.h
+index d3b3145a35..e11efb9f67 100644
+--- a/src/compositor/compositor-private.h
++++ b/src/compositor/compositor-private.h
+@@ -77,6 +77,8 @@ gboolean meta_compositor_is_switching_workspace (MetaCompositor *compositor);
+ void meta_compositor_grab_begin (MetaCompositor *compositor);
+ void meta_compositor_grab_end (MetaCompositor *compositor);
+ 
++void meta_compositor_update_blur_behind(MetaCompositor *compositor);
++
+ /*
+  * This function takes a 64 bit time stamp from the monotonic clock, and clamps
+  * it to the scope of the X server clock, without losing the granularity.
+diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
+index 1576ce551c..dec3d63d51 100644
+--- a/src/compositor/compositor.c
++++ b/src/compositor/compositor.c
+@@ -85,6 +85,8 @@
+ #include "wayland/meta-wayland-private.h"
+ #endif
+ 
++#include "core/meta-workspace-manager-private.h"
++
+ enum
+ {
+   PROP_0,
+@@ -512,6 +514,10 @@ meta_compositor_add_window (MetaCompositor    *compositor,
+    * before we first paint.
+    */
+   priv->windows = g_list_append (priv->windows, window_actor);
++
++  if (window->client_type == META_WINDOW_CLIENT_TYPE_X11)
++    meta_window_actor_create_blur_actor(window_actor);
++
+   sync_actor_stacking (compositor);
+ }
+ 
+@@ -558,6 +564,7 @@ meta_compositor_queue_frame_drawn (MetaCompositor *compositor,
+   MetaWindowActor *window_actor = meta_window_actor_from_window (window);
+ 
+   meta_window_actor_queue_frame_drawn (window_actor, no_delay_frame);
++  meta_compositor_update_blur_behind(compositor);
+ }
+ 
+ void
+@@ -889,6 +896,20 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
+ 
+   sync_actor_stacking (compositor);
+ 
++  MetaWorkspaceManager *manager = priv->display->workspace_manager;
++  MetaWorkspace *active_workspace = manager->active_workspace;
++
++  for (GList *l = priv->windows; l; l = l->next)
++    {
++      MetaWindow *window = meta_window_actor_get_meta_window(l->data);
++      MetaWorkspace *workspace = meta_window_get_workspace(window);
++      if (workspace == active_workspace)
++        {
++          meta_window_actor_set_blur_behind(l->data);
++          meta_window_actor_update_blur_position_size(l->data);
++        }
++    }
++
+   top_window_actor = get_top_visible_window_actor (compositor);
+ 
+   if (priv->top_window_actor == top_window_actor)
+@@ -919,7 +940,17 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
+   changes = meta_window_actor_sync_actor_geometry (window_actor, did_placement);
+ 
+   if (changes & META_WINDOW_ACTOR_CHANGE_SIZE)
++  {
++    if (meta_window_actor_should_clip(window_actor))
++      meta_window_actor_update_clipped_bounds(window_actor);
+     meta_plugin_manager_event_size_changed (priv->plugin_mgr, window_actor);
++    meta_window_actor_update_blur_position_size(window_actor);
++  }
++
++  if (changes & META_WINDOW_ACTOR_CHANGE_POSITION)
++    meta_window_actor_update_blur_position_size(window_actor);
++
++  meta_compositor_update_blur_behind(compositor);
+ }
+ 
+ static void
+@@ -1085,6 +1116,45 @@ meta_compositor_get_property (GObject    *object,
+     }
+ }
+ 
++static void
++prefs_changed_cb(MetaPreference pref,
++                 gpointer       user_data)
++{
++  MetaCompositor *compositor = user_data;
++  MetaCompositorPrivate *priv =
++    meta_compositor_get_instance_private (compositor);
++  GList *l;
++
++  for (l = priv->windows; l; l = l->next)
++  {
++    switch (pref)
++    {
++    case META_PREF_CORNER_RADIUS:
++    case META_PREF_CLIP_EDGE_PADDING:
++    case META_PREF_BORDER_WIDTH:
++    case META_PREF_BORDER_BRIGHTNESS:
++      if (pref == META_PREF_CLIP_EDGE_PADDING)
++        meta_window_actor_update_clip_padding (l->data);
++      
++      meta_window_actor_update_clipped_bounds (l->data);
++      meta_window_actor_update_glsl (l->data);
++      clutter_actor_queue_redraw (CLUTTER_ACTOR (l->data));
++      break;
++    case META_PREF_BLUR_SIGMAL:
++      meta_window_actor_update_blur_sigmal (l->data);
++      break;
++    case META_PREF_BLUR_BRIGHTNESS:
++      meta_window_actor_update_blur_brightness (l->data);
++      break;
++    case META_PREF_BLUR_WINDOW_OPACITY:
++      meta_window_actor_update_blur_window_opacity (l->data);
++      break;
++    default:
++      break;
++    }
++  }
++}
++
+ static void
+ meta_compositor_init (MetaCompositor *compositor)
+ {
+@@ -1115,6 +1185,8 @@ meta_compositor_constructed (GObject *object)
+ 
+   priv->laters = meta_laters_new (compositor);
+ 
++  meta_prefs_add_listener(prefs_changed_cb, compositor);
++
+   G_OBJECT_CLASS (meta_compositor_parent_class)->constructed (object);
+ }
+ 
+@@ -1134,6 +1206,8 @@ meta_compositor_dispose (GObject *object)
+ 
+   g_clear_pointer (&priv->windows, g_list_free);
+ 
++  meta_prefs_remove_listener(prefs_changed_cb, compositor);
++
+   G_OBJECT_CLASS (meta_compositor_parent_class)->dispose (object);
+ }
+ 
+@@ -1477,3 +1551,20 @@ meta_compositor_get_laters (MetaCompositor *compositor)
+ 
+   return priv->laters;
+ }
++
++void meta_compositor_update_blur_behind(MetaCompositor *compositor)
++{
++  MetaCompositorPrivate *priv =
++    meta_compositor_get_instance_private (compositor);
++
++  MetaWorkspaceManager *manager = priv->display->workspace_manager;
++  MetaWorkspace *active_workspace = manager->active_workspace;
++
++  for (GList *l = priv->windows; l; l = l->next)
++    {
++      MetaWindow *window = meta_window_actor_get_meta_window(l->data);
++      MetaWorkspace *workspace = meta_window_get_workspace(window);
++      if (workspace == active_workspace)
++        meta_window_actor_set_blur_behind(l->data);
++    }
++}
+diff --git a/src/compositor/meta-window-actor-private.h b/src/compositor/meta-window-actor-private.h
+index 138ce2c832..abcd695a9b 100644
+--- a/src/compositor/meta-window-actor-private.h
++++ b/src/compositor/meta-window-actor-private.h
+@@ -106,4 +106,15 @@ void meta_window_actor_update_regions (MetaWindowActor *self);
+ 
+ gboolean meta_window_actor_can_freeze_commits (MetaWindowActor *self);
+ 
++gboolean meta_window_actor_should_clip (MetaWindowActor *self);
++void meta_window_actor_update_clipped_bounds (MetaWindowActor *window_actor);
++void meta_window_actor_update_glsl (MetaWindowActor *self);
++void meta_window_actor_get_corner_rect (MetaWindowActor *self, MetaRectangle *rect);
++void meta_window_actor_update_clip_padding (MetaWindowActor *self);
++void meta_window_actor_create_blur_actor (MetaWindowActor *self);
++void meta_window_actor_set_blur_behind (MetaWindowActor *self);
++void meta_window_actor_update_blur_position_size (MetaWindowActor *self);
++void meta_window_actor_update_blur_sigmal (MetaWindowActor *self);
++void meta_window_actor_update_blur_brightness (MetaWindowActor *self);
++void meta_window_actor_update_blur_window_opacity (MetaWindowActor *self);
+ #endif /* META_WINDOW_ACTOR_PRIVATE_H */
+diff --git a/src/compositor/meta-window-actor-wayland.c b/src/compositor/meta-window-actor-wayland.c
+index 468229751f..eefd9c26bf 100644
+--- a/src/compositor/meta-window-actor-wayland.c
++++ b/src/compositor/meta-window-actor-wayland.c
+@@ -24,10 +24,36 @@
+ #include "compositor/meta-window-actor-wayland.h"
+ #include "meta/meta-window-actor.h"
+ #include "wayland/meta-wayland-surface.h"
++#include "meta/meta-shadow-factory.h"
++#include "ui/frames.h"
++#include "compositor/compositor-private.h"
+ 
+ struct _MetaWindowActorWayland
+ {
+   MetaWindowActor parent;
++
++  /* copy from meta-window-actor-x11.c */
++  MetaShadow *focused_shadow;
++  MetaShadow *unfocused_shadow;
++  gboolean recompute_focused_shadow;
++  gboolean recompute_unfocused_shadow;
++
++  /* The region we should clip to when painting the shadow */
++  cairo_region_t *shadow_clip;
++  /* The frame region */
++  cairo_region_t *frame_bounds;
++  /* A region that matches the shape of the window, including frame bounds */
++  cairo_region_t *shape_region;
++
++  MetaWindowShape *shadow_shape;
++
++  gboolean need_reshape;
++
++  MetaShadowFactory *shadow_factory;
++  gulong shadow_factory_changed_handler_id;
++  gulong size_changed_id;
++  gulong repaint_scheduled_id;
++  
+ };
+ 
+ G_DEFINE_TYPE (MetaWindowActorWayland, meta_window_actor_wayland, META_TYPE_WINDOW_ACTOR)
+@@ -104,18 +130,54 @@ meta_window_actor_wayland_get_topmost_surface (MetaWindowActor *actor)
+   return NULL;
+ }
+ 
++static void
++surface_size_changed (MetaSurfaceActor *actor,
++                      gpointer          user_data)
++{
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (user_data);
++  actor_wayland->need_reshape = TRUE;
++}
++
++static void
++surface_repaint_scheduled (MetaSurfaceActor *actor,
++                           gpointer          user_data)
++{
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (user_data);
++  MetaWindow *window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR(actor_wayland));
++  meta_compositor_update_blur_behind( meta_display_get_compositor (window->display));
++}
++
++
+ static void
+ meta_window_actor_wayland_assign_surface_actor (MetaWindowActor  *actor,
+                                                 MetaSurfaceActor *surface_actor)
+ {
+   MetaWindowActorClass *parent_class =
+     META_WINDOW_ACTOR_CLASS (meta_window_actor_wayland_parent_class);
++  MetaSurfaceActor *prev_surface_actor;
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (actor);
++
+ 
+   g_warn_if_fail (!meta_window_actor_get_surface (actor));
+ 
++  prev_surface_actor = meta_window_actor_get_surface (actor);
++  if (prev_surface_actor)
++    g_clear_signal_handler (&META_WINDOW_ACTOR_WAYLAND (actor)->size_changed_id,
++                            prev_surface_actor);
++
+   parent_class->assign_surface_actor (actor, surface_actor);
+ 
+   meta_window_actor_wayland_rebuild_surface_tree (actor);
++
++  actor_wayland->size_changed_id =
++    g_signal_connect (surface_actor, "size-changed",
++                      G_CALLBACK (surface_size_changed),
++                      actor_wayland);
++
++  actor_wayland->repaint_scheduled_id = 
++    g_signal_connect (surface_actor, "repaint-scheduled",
++                      G_CALLBACK (surface_repaint_scheduled),
++                      actor_wayland);
+ }
+ 
+ static void
+@@ -131,10 +193,287 @@ meta_window_actor_wayland_queue_frame_drawn (MetaWindowActor *actor,
+ {
+ }
+ 
++static const char *
++get_shadow_class (MetaWindowActorWayland *actor_x11)
++{
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
++  MetaWindowType window_type;
++
++  window_type = meta_window_get_window_type (window);
++  switch (window_type)
++    {
++    case META_WINDOW_DROPDOWN_MENU:
++    case META_WINDOW_COMBO:
++      return "dropdown-menu";
++    case META_WINDOW_POPUP_MENU:
++      return "popup-menu";
++    default:
++      {
++        MetaFrameType frame_type;
++
++        frame_type = meta_window_get_frame_type (window);
++        return meta_frame_type_to_string (frame_type);
++      }
++    }
++}
++
++static void
++invalidate_shadow (MetaWindowActorWayland *actor_wayland)
++{
++  actor_wayland->recompute_focused_shadow = TRUE;
++  actor_wayland->recompute_unfocused_shadow = TRUE;
++
++  if (meta_window_actor_is_frozen (META_WINDOW_ACTOR (actor_wayland)))
++    return;
++
++  clutter_actor_queue_redraw (CLUTTER_ACTOR (actor_wayland));
++  clutter_actor_invalidate_paint_volume (CLUTTER_ACTOR (actor_wayland));
++}
++
++static void
++update_shape_region (MetaWindowActorWayland *actor_wayland)
++{
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_wayland));
++  cairo_region_t *region = NULL;
++  cairo_rectangle_int_t client_area;
++
++  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_wayland)) && !window->frame)
++    {
++      meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_wayland), &client_area);
++      region = cairo_region_create_rectangle(&client_area);  
++    }
++  else
++    {
++      return;
++    }
++  
++  g_clear_pointer (&actor_wayland->shape_region, cairo_region_destroy);
++  actor_wayland->shape_region = region;
++
++  g_clear_pointer (&actor_wayland->shadow_shape, meta_window_shape_unref);
++
++  invalidate_shadow (actor_wayland);
++}
++
++static cairo_region_t *
++meta_window_get_clipped_frame_bounds(MetaWindow *window)
++{
++  g_return_val_if_fail(window, NULL);
++
++  MetaWindowActor *actor = meta_window_actor_from_window(window);
++  if (actor && !window->frame_bounds)
++  {
++    MetaRectangle rect;
++    meta_window_actor_get_corner_rect(actor, &rect);
++    window->frame_bounds = 
++      meta_ui_frame_get_bounds_clipped(&rect,
++                                       meta_prefs_get_round_corner_radius());
++  }
++  return window->frame_bounds;
++}
++
++static void
++update_frame_bounds (MetaWindowActorWayland *actor_wayland)
++{
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_wayland));
++
++  g_clear_pointer (&actor_wayland->frame_bounds, cairo_region_destroy);
++  
++  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_wayland)))
++    actor_wayland->frame_bounds =
++      cairo_region_copy(meta_window_get_clipped_frame_bounds(window));
++}
++
++static void
++get_shape_bounds (MetaWindowActorWayland    *actor_wayland,
++                  cairo_rectangle_int_t     *bounds)
++{
++  cairo_region_get_extents (actor_wayland->shape_region, bounds);
++}
++
++static void
++check_needs_shadow (MetaWindowActorWayland *actor_wayland)
++{
++  MetaWindow *window =
++    meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_wayland));
++  MetaShadow *old_shadow = NULL;
++  MetaShadow **shadow_location;
++  gboolean recompute_shadow;
++  gboolean should_have_shadow;
++  gboolean appears_focused;
++
++  should_have_shadow = 
++    meta_window_actor_should_clip (META_WINDOW_ACTOR (actor_wayland));
++  appears_focused = meta_window_appears_focused (window);
++
++  if (appears_focused)
++    {
++      recompute_shadow = actor_wayland->recompute_focused_shadow;
++      actor_wayland->recompute_focused_shadow = FALSE;
++      shadow_location = &actor_wayland->focused_shadow;
++    }
++  else
++    {
++      recompute_shadow = actor_wayland->recompute_unfocused_shadow;
++      actor_wayland->recompute_unfocused_shadow = FALSE;
++      shadow_location = &actor_wayland->unfocused_shadow;
++    }
++
++  if (!should_have_shadow || recompute_shadow)
++    {
++      if (*shadow_location != NULL)
++        {
++          old_shadow = *shadow_location;
++          *shadow_location = NULL;
++        }
++    }
++
++  if (!*shadow_location && should_have_shadow)
++    {
++      MetaShadowFactory *factory = actor_wayland->shadow_factory;
++      const char *shadow_class = get_shadow_class (actor_wayland);
++      cairo_rectangle_int_t shape_bounds;
++
++      if (!actor_wayland->shadow_shape)
++        {
++          actor_wayland->shadow_shape =
++            meta_window_shape_new (actor_wayland->shape_region);
++        }
++
++      get_shape_bounds (actor_wayland, &shape_bounds);
++      *shadow_location =
++        meta_shadow_factory_get_shadow (factory,
++                                        actor_wayland->shadow_shape,
++                                        shape_bounds.width, shape_bounds.height,
++                                        shadow_class, appears_focused);
++    }
++
++  if (old_shadow)
++    meta_shadow_unref (old_shadow);
++}
++
++static void
++get_shadow_params (MetaWindowActorWayland *actor_wayland,
++                   gboolean                appears_focused,
++                   MetaShadowParams       *params)
++{
++  const char *shadow_class = get_shadow_class (actor_wayland);
++
++  meta_shadow_factory_get_params (actor_wayland->shadow_factory,
++                                  shadow_class, appears_focused,
++                                  params);
++}
++
++static gboolean
++clip_shadow_under_window (MetaWindowActorWayland *actor_wayland)
++{
++  return TRUE;
++}
++
+ static void
+ meta_window_actor_wayland_before_paint (MetaWindowActor  *actor,
+                                         ClutterStageView *stage_view)
+ {
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (actor);
++
++  if (meta_window_actor_should_clip (actor))
++    {
++      update_frame_bounds (actor_wayland);
++      if (actor_wayland->need_reshape)
++      {
++        update_shape_region (actor_wayland);
++        actor_wayland->need_reshape = FALSE;
++      }
++      check_needs_shadow (actor_wayland);
++    }
++}
++
++static void
++get_shadow_bounds (MetaWindowActorWayland    *actor_x11,
++                   gboolean                   appears_focused,
++                   cairo_rectangle_int_t     *bounds)
++{
++  MetaShadow *shadow;
++  cairo_rectangle_int_t shape_bounds;
++  MetaShadowParams params;
++
++  shadow = appears_focused ? actor_x11->focused_shadow
++                           : actor_x11->unfocused_shadow;
++
++  get_shape_bounds (actor_x11, &shape_bounds);
++  get_shadow_params (actor_x11, appears_focused, &params);
++
++  meta_shadow_get_bounds (shadow,
++                          params.x_offset + shape_bounds.x,
++                          params.y_offset + shape_bounds.y,
++                          shape_bounds.width,
++                          shape_bounds.height,
++                          bounds);
++}
++
++/* Copy from ./meta-window-actor-x11.c
++ * to draw shadows for rounded wayland clients
++ * because oragin shadows has been cutted out
++ */
++static void
++meta_window_actor_wayland_paint (ClutterActor        *actor,
++                                 ClutterPaintContext *paint_context)
++{
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (actor);
++  MetaWindow *window;
++  gboolean appears_focused;
++  MetaShadow *shadow;
++
++  window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_wayland));
++  appears_focused = meta_window_appears_focused (window);
++  shadow = appears_focused ? actor_wayland->focused_shadow
++                           : actor_wayland->unfocused_shadow;
++
++  if (shadow && meta_window_actor_should_clip (META_WINDOW_ACTOR (actor_wayland)))
++    {
++      MetaShadowParams params;
++      cairo_rectangle_int_t shape_bounds;
++      cairo_region_t *clip = actor_wayland->shadow_clip;
++      CoglFramebuffer *framebuffer;
++
++      meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_wayland), &shape_bounds);
++      get_shadow_params (actor_wayland, appears_focused, &params);
++
++      /* The frame bounds are already subtracted from actor_wayland->shadow_clip
++       * if that exists.
++       */
++      if (!clip && clip_shadow_under_window (actor_wayland))
++        {
++          cairo_rectangle_int_t bounds;
++
++          get_shadow_bounds (actor_wayland, appears_focused, &bounds);
++          clip = cairo_region_create_rectangle (&bounds);
++
++          if (actor_wayland->frame_bounds)
++            cairo_region_subtract (clip, actor_wayland->frame_bounds);
++        }
++
++      framebuffer = clutter_paint_context_get_framebuffer (paint_context);
++      meta_shadow_paint (shadow,
++                         framebuffer,
++                         params.x_offset + shape_bounds.x,
++                         params.y_offset + shape_bounds.y,
++                         shape_bounds.width,
++                         shape_bounds.height,
++                         (clutter_actor_get_paint_opacity (actor) *
++                          params.opacity * window->opacity) / (255 * 255),
++                         clip,
++                         clip_shadow_under_window (actor_wayland));
++
++      if (clip && clip != actor_wayland->shadow_clip)
++        cairo_region_destroy (clip);
++    }
++
++  CLUTTER_ACTOR_CLASS (meta_window_actor_wayland_parent_class)->paint (actor,
++                                                                       paint_context);
+ }
+ 
+ static void
+@@ -165,12 +504,29 @@ meta_window_actor_wayland_can_freeze_commits (MetaWindowActor *actor)
+   return FALSE;
+ }
+ 
++static void
++meta_window_actor_wayland_constructed (GObject *object)
++{
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (object);
++
++  /*
++   * Start off with an empty shape region to maintain the invariant that it's
++   * always set.
++   */
++  actor_wayland->shape_region = cairo_region_create ();
++
++  G_OBJECT_CLASS (meta_window_actor_wayland_parent_class)->constructed (object);
++}
++
++
+ static void
+ meta_window_actor_wayland_dispose (GObject *object)
+ {
+   MetaWindowActor *window_actor = META_WINDOW_ACTOR (object);
+   MetaSurfaceActor *surface_actor =
+     meta_window_actor_get_surface (window_actor);
++  MetaWindowActorWayland *actor_wayland = META_WINDOW_ACTOR_WAYLAND (object);
++  
+   g_autoptr (GList) children = NULL;
+   GList *l;
+ 
+@@ -183,7 +539,19 @@ meta_window_actor_wayland_dispose (GObject *object)
+           child_actor != CLUTTER_ACTOR (surface_actor))
+         clutter_actor_remove_child (CLUTTER_ACTOR (window_actor), child_actor);
+     }
+-
++  
++  g_clear_pointer (&actor_wayland->shape_region, cairo_region_destroy);
++  g_clear_pointer (&actor_wayland->shadow_clip, cairo_region_destroy);
++  g_clear_pointer (&actor_wayland->frame_bounds, cairo_region_destroy);
++
++  g_clear_pointer (&actor_wayland->focused_shadow, meta_shadow_unref);
++  g_clear_pointer (&actor_wayland->unfocused_shadow, meta_shadow_unref);
++  g_clear_pointer (&actor_wayland->shadow_shape, meta_window_shape_unref);
++
++  g_clear_signal_handler (&actor_wayland->size_changed_id, surface_actor);
++  g_clear_signal_handler (&actor_wayland->repaint_scheduled_id, surface_actor);
++  g_clear_signal_handler (&actor_wayland->shadow_factory_changed_handler_id,
++                          actor_wayland->shadow_factory);
+   G_OBJECT_CLASS (meta_window_actor_wayland_parent_class)->dispose (object);
+ }
+ 
+@@ -191,6 +559,7 @@ static void
+ meta_window_actor_wayland_class_init (MetaWindowActorWaylandClass *klass)
+ {
+   MetaWindowActorClass *window_actor_class = META_WINDOW_ACTOR_CLASS (klass);
++  ClutterActorClass *actor_class = CLUTTER_ACTOR_CLASS (klass);
+   GObjectClass *object_class = G_OBJECT_CLASS (klass);
+ 
+   window_actor_class->get_topmost_surface = meta_window_actor_wayland_get_topmost_surface;
+@@ -204,10 +573,19 @@ meta_window_actor_wayland_class_init (MetaWindowActorWaylandClass *klass)
+   window_actor_class->update_regions = meta_window_actor_wayland_update_regions;
+   window_actor_class->can_freeze_commits = meta_window_actor_wayland_can_freeze_commits;
+ 
++  actor_class->paint = meta_window_actor_wayland_paint;
++
++  object_class->constructed = meta_window_actor_wayland_constructed;
+   object_class->dispose = meta_window_actor_wayland_dispose;
+ }
+ 
+ static void
+ meta_window_actor_wayland_init (MetaWindowActorWayland *self)
+ {
++  self->shadow_factory = meta_shadow_factory_get_default ();
++  self->shadow_factory_changed_handler_id =
++    g_signal_connect_swapped (self->shadow_factory,
++                              "changed",
++                              G_CALLBACK (invalidate_shadow),
++                              self);
+ }
+diff --git a/src/compositor/meta-window-actor-x11.c b/src/compositor/meta-window-actor-x11.c
+index 9e64462ea8..7c003a3428 100644
+--- a/src/compositor/meta-window-actor-x11.c
++++ b/src/compositor/meta-window-actor-x11.c
+@@ -142,7 +142,8 @@ surface_repaint_scheduled (MetaSurfaceActor *actor,
+                            gpointer          user_data)
+ {
+   MetaWindowActorX11 *actor_x11 = META_WINDOW_ACTOR_X11 (user_data);
+-
++  MetaWindow *window = meta_window_actor_get_meta_window (META_WINDOW_ACTOR(actor_x11));
++  meta_compositor_update_blur_behind( meta_display_get_compositor (window->display));
+   actor_x11->repaint_scheduled = TRUE;
+ }
+ 
+@@ -438,6 +439,8 @@ surface_size_changed (MetaSurfaceActor *actor,
+   MetaWindowActorX11 *actor_x11 = META_WINDOW_ACTOR_X11 (user_data);
+ 
+   meta_window_actor_x11_update_shape (actor_x11);
++
++  meta_window_actor_update_glsl(META_WINDOW_ACTOR(actor_x11));
+ }
+ 
+ static void
+@@ -576,6 +579,9 @@ has_shadow (MetaWindowActorX11 *actor_x11)
+   if (meta_window_get_frame (window))
+     return TRUE;
+ 
++  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
++    return TRUE;
++
+   /*
+    * Do not add shadows to non-opaque (ARGB32) windows, as we can't easily
+    * generate shadows for them.
+@@ -732,6 +738,8 @@ clip_shadow_under_window (MetaWindowActorX11 *actor_x11)
+ 
+   if (window->frame)
+     return TRUE;
++  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
++    return TRUE;
+ 
+   return meta_window_actor_is_opaque (META_WINDOW_ACTOR (actor_x11));
+ }
+@@ -1074,6 +1082,11 @@ update_shape_region (MetaWindowActorX11 *actor_x11)
+     {
+       region = cairo_region_reference (window->shape_region);
+     }
++  else if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)) && !window->frame)
++    {
++      meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_x11), &client_area);
++      region = cairo_region_create_rectangle(&client_area);  
++    }
+   else
+     {
+       /* If we don't have a shape on the server, that means that
+@@ -1081,7 +1094,7 @@ update_shape_region (MetaWindowActorX11 *actor_x11)
+        * entire window. */
+       region = cairo_region_create_rectangle (&client_area);
+     }
+-
++  
+   if (window->shape_region || window->frame)
+     build_and_scan_frame_mask (actor_x11, region);
+ 
+@@ -1189,6 +1202,23 @@ update_opaque_region (MetaWindowActorX11 *actor_x11)
+   cairo_region_destroy (opaque_region);
+ }
+ 
++static cairo_region_t *
++meta_window_get_clipped_frame_bounds(MetaWindow *window)
++{
++  g_return_val_if_fail(window, NULL);
++
++  MetaWindowActor *actor = meta_window_actor_from_window(window);
++  if (actor && !window->frame_bounds)
++  {
++    MetaRectangle rect;
++    meta_window_actor_get_corner_rect(actor, &rect);
++    window->frame_bounds = 
++      meta_ui_frame_get_bounds_clipped(&rect,
++                                       meta_prefs_get_round_corner_radius());
++  }
++  return window->frame_bounds;
++}
++
+ static void
+ update_frame_bounds (MetaWindowActorX11 *actor_x11)
+ {
+@@ -1196,8 +1226,13 @@ update_frame_bounds (MetaWindowActorX11 *actor_x11)
+     meta_window_actor_get_meta_window (META_WINDOW_ACTOR (actor_x11));
+ 
+   g_clear_pointer (&actor_x11->frame_bounds, cairo_region_destroy);
+-  actor_x11->frame_bounds =
+-    cairo_region_copy (meta_window_get_frame_bounds (window));
++  
++  if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
++    actor_x11->frame_bounds =
++      cairo_region_copy(meta_window_get_clipped_frame_bounds(window));
++  else
++    actor_x11->frame_bounds =
++      cairo_region_copy (meta_window_get_frame_bounds (window));
+ }
+ 
+ static void
+@@ -1342,7 +1377,10 @@ meta_window_actor_x11_paint (ClutterActor        *actor,
+       cairo_region_t *clip = actor_x11->shadow_clip;
+       CoglFramebuffer *framebuffer;
+ 
+-      get_shape_bounds (actor_x11, &shape_bounds);
++      if (meta_window_actor_should_clip(META_WINDOW_ACTOR(actor_x11)))
++        meta_window_actor_get_corner_rect(META_WINDOW_ACTOR(actor_x11), &shape_bounds);
++      else
++        get_shape_bounds (actor_x11, &shape_bounds);
+       get_shadow_params (actor_x11, appears_focused, &params);
+ 
+       /* The frame bounds are already subtracted from actor_x11->shadow_clip
+diff --git a/src/compositor/meta-window-actor.c b/src/compositor/meta-window-actor.c
+index 9cee56a371..de5775768c 100644
+--- a/src/compositor/meta-window-actor.c
++++ b/src/compositor/meta-window-actor.c
+@@ -41,6 +41,9 @@
+ #include "wayland/meta-wayland-surface.h"
+ #endif
+ 
++#include "meta_clip_effect.h"
++#include "shell-blur-effect.h"
++
+ typedef enum
+ {
+   INITIALLY_FROZEN,
+@@ -55,6 +58,15 @@ typedef struct _MetaWindowActorPrivate
+ 
+   MetaSurfaceActor *surface;
+ 
++  MetaClipEffect *round_clip_effect;
++  gboolean effect_setuped;
++  gboolean should_clip;
++  int clip_padding[4];
++  ClutterActor *blur_actor;
++  MetaShellBlurEffect *blur_effect;
++
++  ulong visible_changed_id;
++  ulong wm_class_changed_id;
+   int geometry_scale;
+ 
+   /*
+@@ -121,6 +133,246 @@ G_DEFINE_ABSTRACT_TYPE_WITH_CODE (MetaWindowActor, meta_window_actor, CLUTTER_TY
+                                   G_IMPLEMENT_INTERFACE (META_TYPE_CULLABLE, cullable_iface_init)
+                                   G_IMPLEMENT_INTERFACE (META_TYPE_SCREEN_CAST_WINDOW, screen_cast_window_iface_init));
+ 
++static gboolean _meta_window_actor_should_clip(MetaWindowActor *self);
++
++static MetaClipEffect*
++create_clip_effect(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  if ((priv->should_clip = _meta_window_actor_should_clip(self)))
++    return meta_clip_effect_new();
++  else
++    return NULL;
++}
++
++void
++meta_window_actor_update_blur_position_size(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  MetaRectangle buf_rect;
++  MetaRectangle frame_rect;
++  meta_window_get_frame_rect (priv->window, &frame_rect);
++  meta_window_get_buffer_rect (priv->window, &buf_rect);
++
++  if (meta_window_get_maximized (priv->window) ||
++      meta_window_is_fullscreen (priv->window))
++    {
++      clutter_actor_set_position (priv->blur_actor,
++                                  frame_rect.x,
++                                  frame_rect.y);
++      clutter_actor_set_size (priv->blur_actor,
++                              frame_rect.width,
++                              frame_rect.height);
++      meta_shell_blur_effect_set_skip (priv->blur_effect, true);
++    }
++  else
++   {
++      clutter_actor_set_position (priv->blur_actor,
++                                  frame_rect.x + priv->clip_padding[0] - 1,
++                                  frame_rect.y + priv->clip_padding[2] - 1);
++      clutter_actor_set_size (priv->blur_actor,
++                              frame_rect.width - priv->clip_padding[0] - priv->clip_padding[1] + 1,
++                              frame_rect.height - priv->clip_padding[2] - priv->clip_padding[3] + 1);
++      meta_shell_blur_effect_set_skip (priv->blur_effect, false);
++   }
++}
++
++void
++meta_window_actor_set_blur_behind (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR(self));
++  clutter_actor_set_child_below_sibling (parent, priv->blur_actor, CLUTTER_ACTOR(self));  
++}
++
++static gboolean
++meta_window_is_normal (MetaWindowActor *actor)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (actor);
++  MetaWindowType type = meta_window_get_window_type (priv->window);
++
++switch (type)
++  {
++    case META_WINDOW_NORMAL:
++    case META_WINDOW_DIALOG:
++    case META_WINDOW_MODAL_DIALOG:
++    case META_WINDOW_SPLASHSCREEN:
++      return TRUE;
++    default:
++      return FALSE;
++  }
++}
++
++
++/*
++ * in xwayland, `res-name` property of MetaWindow (WM_CLASS_INSTANCE property)
++ * is empty when MetaWindow has been added to MetaWindowActor. So we have to
++ * create create blur actor in on_wm_class_changed callback.
++ * 
++ * in xorg, `res-name` property of MetaWindow has been setted when MetaWindow,
++ * so we can create blur actor when window actor be created.
++ */
++void
++meta_window_actor_create_blur_actor (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++  
++  if (!meta_window_is_normal (self))
++    return;
++  if (!meta_prefs_in_blur_list (priv->window->res_name))
++    return;
++  if (priv->blur_actor != NULL)
++    return;
++
++  priv->blur_actor = clutter_actor_new ();
++  priv->blur_effect = meta_shell_blur_effect_new ();
++
++  meta_shell_blur_effect_set_brightness (priv->blur_effect,
++                                    meta_prefs_get_blur_brightness());
++  meta_shell_blur_effect_set_sigma (priv->blur_effect,
++                               meta_prefs_get_blur_sigmal());
++  meta_shell_blur_effect_set_mode (priv->blur_effect, SHELL_BLUR_MODE_BACKGROUND);
++  clutter_actor_add_effect_with_name (priv->blur_actor,
++                                      "ShellBlurEffect",
++                                      CLUTTER_EFFECT(priv->blur_effect));
++
++  ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR(self));
++  clutter_actor_insert_child_below (parent, priv->blur_actor, CLUTTER_ACTOR(self));
++  int opa = meta_prefs_get_blur_window_opacity();
++  meta_window_set_opacity(priv->window, opa);
++}
++
++static void
++check_meta_window_surface_actor(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  MetaSurfaceActor *surface = meta_window_actor_get_surface(self);
++
++  if (!priv->effect_setuped && surface && priv->round_clip_effect)
++  {
++    clutter_actor_add_effect_with_name(CLUTTER_ACTOR(surface),
++                                       "Rounded Corners Effect(Surface)",
++                                       CLUTTER_EFFECT(priv->round_clip_effect));
++    priv->effect_setuped = true;
++  }
++}
++
++void
++meta_window_actor_update_glsl(MetaWindowActor *self)
++{
++  MetaRectangle frame_rect;
++  MetaRectangle buf_rect;
++  MetaWindow *window = meta_window_actor_get_meta_window(self);
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++
++  if(!priv->round_clip_effect)
++    return;
++
++  check_meta_window_surface_actor(self);
++
++  if (!meta_window_actor_should_clip(self))
++  {
++    meta_clip_effect_skip(priv->round_clip_effect);
++    return;
++  }
++
++  meta_window_get_frame_rect(window, &frame_rect);
++  meta_window_get_buffer_rect(window, &buf_rect);
++
++  cairo_rectangle_int_t bounds;
++  bounds.x = frame_rect.x - buf_rect.x;
++  bounds.y = frame_rect.y - buf_rect.y;
++  bounds.width = frame_rect.width;
++  bounds.height = frame_rect.height;
++
++  if (bounds.width <= 0 || bounds.height <= 0)
++    return;
++
++  if (priv->clip_padding[0] == -1 && window->res_name)
++    meta_prefs_get_clip_edge_padding(window->res_name, priv->clip_padding);
++
++  meta_clip_effect_set_bounds(priv->round_clip_effect, &bounds, priv->clip_padding);
++}
++
++static gboolean
++_meta_window_actor_should_clip(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
++  MetaWindow *window = priv->window;
++
++  if (meta_prefs_in_black_list(window->res_name))
++    {
++      return FALSE;
++    }
++
++  return meta_window_is_normal(self);
++}
++
++gboolean
++meta_window_actor_should_clip(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
++
++  return priv->should_clip && 
++        !(meta_window_get_maximized(priv->window)||
++          meta_window_is_fullscreen(priv->window)); 
++}
++
++void
++meta_window_actor_get_corner_rect(MetaWindowActor *self,
++                                  MetaRectangle *rect)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  g_return_if_fail(priv->round_clip_effect);
++  meta_clip_effect_get_bounds(priv->round_clip_effect, rect);
++}
++
++void meta_window_actor_update_clip_padding(MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  if(priv->round_clip_effect)
++    meta_prefs_get_clip_edge_padding(priv->window->res_name,
++                                     priv->clip_padding);
++}
++
++void
++meta_window_actor_update_blur_sigmal (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  if (priv->blur_actor)
++    meta_shell_blur_effect_set_sigma (priv->blur_effect,
++                                 meta_prefs_get_blur_sigmal());
++}
++
++void
++meta_window_actor_update_blur_brightness (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  if (priv->blur_actor)
++    meta_shell_blur_effect_set_brightness (priv->blur_effect,
++                                 meta_prefs_get_blur_brightness());
++}
++
++void
++meta_window_actor_update_blur_window_opacity (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private(self);
++  if (priv->blur_actor)
++    meta_window_set_opacity (priv->window,
++                             meta_prefs_get_blur_window_opacity());
++}
++
+ static void
+ meta_window_actor_class_init (MetaWindowActorClass *klass)
+ {
+@@ -219,6 +471,11 @@ meta_window_actor_init (MetaWindowActor *self)
+     meta_window_actor_get_instance_private (self);
+ 
+   priv->geometry_scale = 1;
++  priv->effect_setuped = FALSE;
++  priv->clip_padding[0] = -1;
++
++  priv->blur_actor = NULL;
++  priv->blur_effect = NULL;
+ }
+ 
+ static void
+@@ -371,6 +628,11 @@ meta_window_actor_real_assign_surface_actor (MetaWindowActor  *self,
+     meta_window_actor_set_frozen (self, TRUE);
+   else
+     meta_window_actor_sync_thawed_state (self);
++
++  if (priv->blur_actor)
++    {
++      meta_window_actor_update_opacity (self);
++    }
+ }
+ 
+ void
+@@ -402,6 +664,32 @@ init_surface_actor (MetaWindowActor *self)
+     meta_window_actor_assign_surface_actor (self, surface_actor);
+ }
+ 
++static void
++on_visible_changed (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  if (priv->visible && !meta_window_actor_effect_in_progress (self))
++    clutter_actor_show(priv->blur_actor);
++  else
++    clutter_actor_hide(priv->blur_actor);
++}
++
++static void
++on_wm_class_changed (MetaWindow *self,
++                     gpointer    user_data)
++{
++  MetaWindowActor *actor = meta_window_actor_from_window (self);
++  MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (actor);
++
++  priv->round_clip_effect = create_clip_effect(actor);
++  meta_window_actor_create_blur_actor(actor);
++  g_clear_signal_handler(&priv->wm_class_changed_id, self);
++}
++
+ static void
+ meta_window_actor_constructed (GObject *object)
+ {
+@@ -409,6 +697,7 @@ meta_window_actor_constructed (GObject *object)
+   MetaWindowActorPrivate *priv =
+     meta_window_actor_get_instance_private (self);
+   MetaWindow *window = priv->window;
++  MetaWindowClientType type = meta_window_get_client_type (window);
+ 
+   priv->compositor = window->display->compositor;
+ 
+@@ -427,6 +716,15 @@ meta_window_actor_constructed (GObject *object)
+     priv->first_frame_state = DRAWING_FIRST_FRAME;
+ 
+   meta_window_actor_sync_actor_geometry (self, priv->window->placed);
++
++  if (type == META_WINDOW_CLIENT_TYPE_WAYLAND)
++  {
++    priv->wm_class_changed_id =
++      g_signal_connect (window, "notify::wm-class", G_CALLBACK (on_wm_class_changed), object);
++  }
++
++  priv->visible_changed_id = 
++    g_signal_connect (object, "notify::visible", G_CALLBACK (on_visible_changed), NULL);
+ }
+ 
+ static void
+@@ -445,6 +743,7 @@ meta_window_actor_dispose (GObject *object)
+ 
+   priv->disposed = TRUE;
+ 
++  g_clear_signal_handler(&priv->visible_changed_id, object);
+   meta_compositor_remove_window_actor (compositor, self);
+ 
+   g_clear_object (&priv->window);
+@@ -473,6 +772,8 @@ meta_window_actor_set_property (GObject      *object,
+     {
+     case PROP_META_WINDOW:
+       priv->window = g_value_dup_object (value);
++      if (priv->window->client_type == META_WINDOW_CLIENT_TYPE_X11)
++        priv->round_clip_effect = create_clip_effect(self);
+       g_signal_connect_object (priv->window, "notify::appears-focused",
+                                G_CALLBACK (window_appears_focused_notify), self, 0);
+       break;
+@@ -603,6 +904,7 @@ meta_window_actor_effect_in_progress (MetaWindowActor *self)
+     meta_window_actor_get_instance_private (self);
+ 
+   return (priv->minimize_in_progress ||
++          priv->unminimize_in_progress ||
+           priv->size_change_in_progress ||
+           priv->map_in_progress ||
+           priv->destroy_in_progress);
+@@ -621,6 +923,47 @@ is_freeze_thaw_effect (MetaPluginEffect event)
+   }
+ }
+ 
++static void
++meta_window_actor_remove_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  ClutterActor *parent = clutter_actor_get_parent (CLUTTER_ACTOR (self));
++  clutter_actor_remove_effect (priv->blur_actor, CLUTTER_EFFECT (priv->blur_effect));
++  clutter_actor_remove_child (parent, priv->blur_actor);
++}
++
++static void
++meta_window_actor_hide_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  clutter_actor_hide(priv->blur_actor);
++}
++
++static void
++meta_window_actor_show_blur (MetaWindowActor *self)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private (self);
++
++  if (!priv->blur_actor)
++    return;
++
++  if (priv->visible && !meta_window_actor_effect_in_progress (self))
++    clutter_actor_show(priv->blur_actor);
++  else
++    clutter_actor_hide(priv->blur_actor);
++}
++
+ static gboolean
+ start_simple_effect (MetaWindowActor  *self,
+                      MetaPluginEffect  event)
+@@ -640,15 +983,33 @@ start_simple_effect (MetaWindowActor  *self,
+   case META_PLUGIN_NONE:
+     return FALSE;
+   case META_PLUGIN_MINIMIZE:
++      if (priv->round_clip_effect)
++        {
++          meta_window_actor_hide_blur(self);
++        }
+     counter = &priv->minimize_in_progress;
+     break;
+   case META_PLUGIN_UNMINIMIZE:
++      if (priv->round_clip_effect)
++        {
++          meta_window_actor_hide_blur(self);
++        }
+     counter = &priv->unminimize_in_progress;
+     break;
+   case META_PLUGIN_MAP:
++      if (priv->round_clip_effect)
++        {
++          meta_window_actor_hide_blur(self);
++        }
+     counter = &priv->map_in_progress;
+     break;
+   case META_PLUGIN_DESTROY:
++      if (priv->round_clip_effect)
++        {
++          clutter_actor_remove_effect (CLUTTER_ACTOR(self),
++                                       CLUTTER_EFFECT(priv->round_clip_effect));
++          meta_window_actor_remove_blur(self);
++        }
+     counter = &priv->destroy_in_progress;
+     break;
+   case META_PLUGIN_SIZE_CHANGE:
+@@ -697,6 +1058,7 @@ meta_window_actor_after_effects (MetaWindowActor *self)
+       g_signal_emit (self, signals[EFFECTS_COMPLETED], 0);
+       meta_window_actor_sync_visibility (self);
+       meta_window_actor_sync_actor_geometry (self, FALSE);
++      meta_window_actor_show_blur(self);
+     }
+ 
+   clutter_stage_repick_device (stage, clutter_seat_get_pointer (seat));
+@@ -818,6 +1180,19 @@ meta_window_actor_queue_destroy (MetaWindowActor *self)
+     clutter_actor_destroy (CLUTTER_ACTOR (self));
+ }
+ 
++void
++meta_window_actor_update_clipped_bounds(MetaWindowActor *window_actor)
++{
++  MetaWindowActorPrivate *priv =
++    meta_window_actor_get_instance_private(window_actor);
++  MetaWindow *window = priv->window;
++
++  if (window && window->frame_bounds) {
++    cairo_region_destroy(window->frame_bounds);
++    window->frame_bounds = NULL;
++  }
++}
++
+ MetaWindowActorChanges
+ meta_window_actor_sync_actor_geometry (MetaWindowActor *self,
+                                        gboolean         did_placement)
+@@ -1046,7 +1421,7 @@ meta_window_actor_sync_visibility (MetaWindowActor *self)
+ 
+   if (CLUTTER_ACTOR_IS_VISIBLE (self) != priv->visible)
+     {
+-      if (priv->visible)
++      if (priv->visible && !priv->unminimize_in_progress)
+         clutter_actor_show (CLUTTER_ACTOR (self));
+       else
+         clutter_actor_hide (CLUTTER_ACTOR (self));
+diff --git a/src/core/prefs.c b/src/core/prefs.c
+index 536d9dd579..29bddc170b 100644
+--- a/src/core/prefs.c
++++ b/src/core/prefs.c
+@@ -33,6 +33,8 @@
+ #include <string.h>
+ #include <stdlib.h>
+ 
++#include <json-glib/json-glib.h>
++
+ #include "compositor/meta-plugin-manager.h"
+ #include "core/keybindings-private.h"
+ #include "core/meta-accel-parse.h"
+@@ -120,6 +122,17 @@ static gboolean show_fallback_app_menu = TRUE;
+ static GDesktopVisualBellType visual_bell_type = G_DESKTOP_VISUAL_BELL_FULLSCREEN_FLASH;
+ static MetaButtonLayout button_layout;
+ 
++static int round_corner_radius = 8;
++static int border_width = 0;
++static int border_brightness = 40;
++static int blur_sigmal = 20;
++static int blur_window_opacity = 80;
++static int blur_brightness = 100;
++static JsonNode *clip_edge_padding = NULL;
++/* NULL-terminated array */
++static char **black_list = NULL;
++static char **blur_list = NULL;
++
+ /* NULL-terminated array */
+ static char **workspace_names = NULL;
+ 
+@@ -150,6 +163,7 @@ static gboolean mouse_button_mods_handler (GVariant*, gpointer*, gpointer);
+ static gboolean button_layout_handler (GVariant*, gpointer*, gpointer);
+ static gboolean overlay_key_handler (GVariant*, gpointer*, gpointer);
+ static gboolean locate_pointer_key_handler (GVariant*, gpointer*, gpointer);
++static gboolean clip_edge_padding_handler (GVariant*, gpointer*, gpointer);
+ 
+ static gboolean iso_next_group_handler (GVariant*, gpointer*, gpointer);
+ 
+@@ -454,6 +468,15 @@ static MetaStringPreference preferences_string[] =
+       locate_pointer_key_handler,
+       NULL,
+     },
++    {
++      {
++        "clip-edge-padding",
++        SCHEMA_MUTTER,
++        META_PREF_CLIP_EDGE_PADDING,
++      },
++      clip_edge_padding_handler,
++      NULL,
++    },
+     { { NULL, 0, 0 }, NULL },
+   };
+ 
+@@ -475,6 +498,22 @@ static MetaStringArrayPreference preferences_string_array[] =
+       iso_next_group_handler,
+       NULL,
+     },
++    {
++      { "black-list",
++        SCHEMA_MUTTER,
++        META_PREF_BLACK_LIST,
++      },
++      NULL,
++      &black_list,
++    },
++    {
++      { "blur-list",
++        SCHEMA_MUTTER,
++        META_PREF_BLUR_LIST,
++      },
++      NULL,
++      &blur_list,
++    },
+     { { NULL, 0, 0 }, NULL },
+   };
+ 
+@@ -515,6 +554,54 @@ static MetaIntPreference preferences_int[] =
+       },
+       &cursor_size
+     },
++    {
++      {
++        "round-corners-radius",
++        SCHEMA_MUTTER,
++        META_PREF_CORNER_RADIUS,
++      },
++      &round_corner_radius,
++    },
++    {
++      {
++        "border-width",
++        SCHEMA_MUTTER,
++        META_PREF_BORDER_WIDTH,
++      },
++      &border_width,
++    },
++    {
++      {
++        "border-brightness",
++        SCHEMA_MUTTER,
++        META_PREF_BORDER_BRIGHTNESS,
++      },
++      &border_brightness,
++    },
++    {
++      {
++        "blur-sigmal",
++        SCHEMA_MUTTER,
++        META_PREF_BLUR_SIGMAL,
++      },
++      &blur_sigmal,
++    },
++    {
++      {
++        "blur-brightness",
++        SCHEMA_MUTTER,
++        META_PREF_BLUR_BRIGHTNESS,
++      },
++      &blur_brightness,
++    },
++    {
++      {
++        "blur-window-opacity",
++        SCHEMA_MUTTER,
++        META_PREF_BLUR_WINDOW_OPACITY,
++      },
++      &blur_window_opacity,
++    },
+     { { NULL, 0, 0 }, NULL },
+   };
+ 
+@@ -1588,6 +1675,81 @@ locate_pointer_key_handler (GVariant *value,
+   return TRUE;
+ }
+ 
++static gboolean
++clip_edge_padding_handler (GVariant *value,
++                           gpointer *result,
++                           gpointer  data)
++{
++  /* json string looks like this:
++   * 
++   * {
++   *    // array represent the clip padding of window: [left, right, top, bottom]
++   *    "global": [1, 1, 1, 1],
++   *    // special app settings,
++   *    "apps": {
++   *       // second part in `WM_CLASS` property of a window
++   *       "Typora": [0, 0, 0, 0],
++   *       ...
++   *    }
++   * } 
++   */
++
++  JsonNode *json;
++  JsonObject *obj;
++  JsonArray *arr;
++  JsonNode *element;
++  JsonObject *apps_obj;
++  GList *app_names;
++
++  const char *string_value;
++  GError *error = NULL;
++
++  *result = NULL;
++  string_value = g_variant_get_string(value, NULL);
++  json = json_from_string(string_value, &error);
++
++  if (error)
++  {
++    meta_topic(META_DEBUG_PREFS, "Failed to parse value for clip-edge-padding: %s", error->message);
++    g_error_free(error);
++    return FALSE;
++  }
++
++  if (!JSON_NODE_HOLDS_OBJECT(json))
++    goto failed;
++
++  obj = json_node_get_object(json);
++  arr = json_object_get_array_member(obj, "global");
++  if (!arr || json_array_get_length(arr) != 4)
++    goto failed;
++  
++  if (!(element = json_object_get_member(obj, "apps")))
++    goto failed;
++  if (!JSON_NODE_HOLDS_OBJECT(element))
++    goto failed;
++  apps_obj = json_node_get_object(element);
++
++  app_names = json_object_get_members(apps_obj);
++  for (GList *l = app_names; l != NULL; l = l->next)
++  {
++    arr = json_object_get_array_member(apps_obj, l->data);
++    if (!arr || json_array_get_length(arr) != 4)
++      goto failed;
++  }
++
++  if (clip_edge_padding != NULL)
++    json_node_unref(clip_edge_padding);
++  clip_edge_padding = json;
++  queue_changed(META_PREF_CLIP_EDGE_PADDING);
++
++  return TRUE;
++
++failed:
++  meta_topic(META_DEBUG_PREFS, "Failed to parse value for clip-edge-padding");
++  json_node_unref(json);
++  return FALSE;
++}
++
+ static gboolean
+ iso_next_group_handler (GVariant *value,
+                         gpointer *result,
+@@ -1759,6 +1921,33 @@ meta_preference_to_string (MetaPreference pref)
+ 
+     case META_PREF_CHECK_ALIVE_TIMEOUT:
+       return "CHECK_ALIVE_TIMEOUT";
++
++    case META_PREF_CORNER_RADIUS:
++      return "CORNER_RADIUS";
++
++    case META_PREF_CLIP_EDGE_PADDING:
++      return "CLIP_EDGE_PADDING";
++
++    case META_PREF_BLACK_LIST:
++      return "BLACK_LIST";
++
++    case META_PREF_BORDER_WIDTH:
++      return "BORDER_WIDTH";
++    
++    case META_PREF_BORDER_BRIGHTNESS:
++      return "BORDER_BRIGHTNESS";
++
++    case META_PREF_BLUR_SIGMAL:
++      return "BLUR_SIGMAL";
++
++    case META_PREF_BLUR_BRIGHTNESS:
++      return "BLUR_BRIGHTNESS";
++
++    case META_PREF_BLUR_LIST:
++      return "BLUR_LIST";
++
++    case META_PREF_BLUR_WINDOW_OPACITY:
++      return "BLUR_WINDOW_OPACITY";
+     }
+ 
+   return "(unknown)";
+@@ -2227,3 +2416,94 @@ meta_prefs_set_force_fullscreen (gboolean whether)
+ {
+   force_fullscreen = whether;
+ }
++
++int
++meta_prefs_get_round_corner_radius (void)
++{
++  return round_corner_radius;
++}
++
++#define SET_PADDING(arr, v0, v1, v2, v3) \
++  { (arr)[0] = (v0); (arr)[1] = (v1); (arr)[2] = (v2); (arr)[3] = (v3); }
++
++void
++meta_prefs_get_clip_edge_padding (const char *name, int padding[4])
++{
++  JsonObject *obj;
++  JsonArray *arr;
++
++  if (!clip_edge_padding || !name) {
++    SET_PADDING(padding, 0, 0, 0, 0);
++    return;
++  }
++
++  obj = json_node_get_object(clip_edge_padding);
++  arr = json_object_get_array_member(obj, "global");
++  obj = json_object_get_object_member(obj, "apps");
++
++  if (json_object_has_member(obj, name))
++    arr = json_object_get_array_member(obj, name);
++
++  // array: { left, right, top, bottom }
++  SET_PADDING(padding, 
++              json_array_get_int_element(arr, 0) + 1,
++              json_array_get_int_element(arr, 1),
++              json_array_get_int_element(arr, 2) + 1,
++              json_array_get_int_element(arr, 3));
++}
++
++gboolean
++meta_prefs_in_black_list(const char *name)
++{
++  g_return_val_if_fail(black_list, FALSE);
++
++  int len = g_strv_length(black_list);
++
++  for (int i = 0; i < len; i++)
++    if (g_strcmp0(name, black_list[i]) == 0)
++      return TRUE;
++  return FALSE;
++}
++
++int
++meta_prefs_get_border_width(void)
++{
++  return border_width;
++}
++
++double
++meta_prefs_get_border_brightness(void)
++{
++  return (double) border_brightness * 0.01;
++}
++
++int
++meta_prefs_get_blur_sigmal(void)
++{
++  return blur_sigmal;
++}
++
++double
++meta_prefs_get_blur_brightness(void)
++{
++  return (double) blur_brightness * 0.01;
++}
++
++int
++meta_prefs_get_blur_window_opacity(void)
++{
++  return blur_window_opacity * 255 * 0.01;
++}
++
++gboolean
++meta_prefs_in_blur_list(const char *name)
++{
++  g_return_val_if_fail(blur_list, FALSE);
++
++  int len = g_strv_length(blur_list);
++
++  for (int i = 0; i < len; i++)
++    if (g_strcmp0(name, blur_list[i]) == 0)
++      return TRUE;
++  return FALSE;
++}
+diff --git a/src/meson.build b/src/meson.build
+index 7b456f524f..35d4b07aaa 100644
+--- a/src/meson.build
++++ b/src/meson.build
+@@ -174,6 +174,18 @@ if get_option('verbose')
+   ]
+ endif
+ 
++libshell_enums = gnome.mkenums_simple('shell-enum-types',
++  sources: [
++    'shell-blur-effect.h',
++  ]
++)
++
++libshell_src = [
++  libshell_enums,
++  'shell-blur-effect.h',
++  'shell-blur-effect.c',
++]
++
+ mutter_sources = [
+   'backends/edid.h',
+   'backends/edid-parse.c',
+@@ -463,6 +475,8 @@ mutter_sources = [
+   'x11/window-x11-private.h',
+   'x11/xprops.c',
+   'x11/xprops.h',
++  'meta_clip_effect.c',
++  'meta_clip_effect.h',
+ ]
+ 
+ if have_egl_device
+@@ -1017,7 +1031,8 @@ subdir('meta')
+ mutter_built_sources += mutter_enum_types
+ 
+ libmutter = shared_library(libmutter_name,
+-  mutter_sources,
++  # mutter_sources,
++  mutter_sources + libshell_src,
+   mutter_built_sources,
+   version: '0.0.0',
+   soversion: 0,
+diff --git a/src/meta/prefs.h b/src/meta/prefs.h
+index 227de68bf2..7d5d8f3471 100644
+--- a/src/meta/prefs.h
++++ b/src/meta/prefs.h
+@@ -106,6 +106,16 @@ typedef enum
+   META_PREF_DRAG_THRESHOLD,
+   META_PREF_LOCATE_POINTER,
+   META_PREF_CHECK_ALIVE_TIMEOUT,
++
++  META_PREF_CORNER_RADIUS,
++  META_PREF_CLIP_EDGE_PADDING,
++  META_PREF_BLACK_LIST,
++  META_PREF_BORDER_WIDTH,
++  META_PREF_BORDER_BRIGHTNESS,
++  META_PREF_BLUR_SIGMAL,
++  META_PREF_BLUR_BRIGHTNESS,
++  META_PREF_BLUR_LIST,
++  META_PREF_BLUR_WINDOW_OPACITY,
+ } MetaPreference;
+ 
+ typedef void (* MetaPrefsChangedFunc) (MetaPreference pref,
+@@ -233,6 +243,33 @@ int      meta_prefs_get_draggable_border_width (void);
+ META_EXPORT
+ int      meta_prefs_get_drag_threshold (void);
+ 
++META_EXPORT
++int      meta_prefs_get_round_corner_radius (void);
++
++META_EXPORT
++void     meta_prefs_get_clip_edge_padding (const char *name, int padding[4]);
++
++META_EXPORT
++gboolean meta_prefs_in_black_list(const char *name);
++
++META_EXPORT
++int      meta_prefs_get_border_width(void);
++
++META_EXPORT
++double   meta_prefs_get_border_brightness(void);
++
++META_EXPORT
++int      meta_prefs_get_blur_sigmal(void);
++
++META_EXPORT
++double   meta_prefs_get_blur_brightness(void);
++
++META_EXPORT
++int      meta_prefs_get_blur_window_opacity(void);
++
++META_EXPORT
++gboolean meta_prefs_in_blur_list(const char *name);
++
+ /**
+  * MetaKeyBindingAction:
+  * @META_KEYBINDING_ACTION_NONE: FILLME
+diff --git a/src/meta_clip_effect.c b/src/meta_clip_effect.c
+new file mode 100644
+index 0000000000..931bd72226
+--- /dev/null
++++ b/src/meta_clip_effect.c
+@@ -0,0 +1,243 @@
++// for 40.4
++
++#include "meta_clip_effect.h"
++#include "meta/prefs.h"
++#include "shader.h"
++
++typedef struct {
++  CoglPipeline *pipeline;
++  ClutterActor *actor;
++  cairo_rectangle_int_t bounds;
++} MetaClipEffectPrivate;
++
++G_DEFINE_TYPE_WITH_PRIVATE(MetaClipEffect, meta_clip_effect, CLUTTER_TYPE_OFFSCREEN_EFFECT)
++
++static CoglPipeline *
++meta_clip_effect_class_create_pipeline(ClutterOffscreenEffect *effect,
++                                       CoglTexture            *texture)
++{
++  MetaClipEffect *clip_effect = META_CLIP_EFFECT (effect);
++  MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(clip_effect);
++  cogl_pipeline_set_layer_texture (priv->pipeline, 0, texture);
++
++  return cogl_object_ref (priv->pipeline);
++}
++
++static void
++meta_clip_effect_set_actor(ClutterActorMeta *meta,
++                           ClutterActor     *actor)
++{
++  ClutterActorMetaClass *meta_class 
++    = CLUTTER_ACTOR_META_CLASS(meta_clip_effect_parent_class);
++  MetaClipEffectPrivate *priv = 
++    meta_clip_effect_get_instance_private(META_CLIP_EFFECT(meta));
++  meta_class->set_actor(meta, actor);
++  priv->actor = clutter_actor_meta_get_actor(meta);
++}
++
++static gboolean
++meta_clip_effect_pre_paint (ClutterEffect *effect,
++                            ClutterPaintNode *node,
++                            ClutterPaintContext *paint_context)
++{
++  gboolean res = 
++    CLUTTER_EFFECT_CLASS (meta_clip_effect_parent_class)->pre_paint(effect, node, paint_context);
++  MetaClipEffect *clip_effect = META_CLIP_EFFECT (effect);
++  MetaClipEffectPrivate *priv = 
++    meta_clip_effect_get_instance_private(META_CLIP_EFFECT(clip_effect));
++  
++  // seems CutterOffscreenEffect will set COGL_PIPELINE_FILTER_NEAREST
++  // as layer filter, force set linear filter before paint now
++  cogl_pipeline_set_layer_filters (priv->pipeline,
++                                   0,
++                                   COGL_PIPELINE_FILTER_LINEAR,
++                                   COGL_PIPELINE_FILTER_LINEAR);
++  return res;
++}
++
++static void
++meta_clip_effect_dispose(GObject *gobject)
++{
++  MetaClipEffect*effect = META_CLIP_EFFECT(gobject);
++  MetaClipEffectPrivate *priv = 
++    meta_clip_effect_get_instance_private(META_CLIP_EFFECT(effect));
++
++  if (priv->pipeline != NULL)
++  {
++    g_clear_pointer(&priv->pipeline, cogl_object_unref);
++  }
++
++  G_OBJECT_CLASS (meta_clip_effect_parent_class)->dispose (gobject);
++}
++
++static void
++meta_clip_effect_class_init(MetaClipEffectClass *klass)
++{
++  GObjectClass *gobject_class = G_OBJECT_CLASS (klass);
++  ClutterEffectClass *effect_class = CLUTTER_EFFECT_CLASS (klass);
++  ClutterOffscreenEffectClass *offscreen_class = CLUTTER_OFFSCREEN_EFFECT_CLASS (klass);
++  ClutterActorMetaClass *meta_class = CLUTTER_ACTOR_META_CLASS(klass);
++
++  meta_class->set_actor = meta_clip_effect_set_actor;
++  effect_class->pre_paint = meta_clip_effect_pre_paint;
++  offscreen_class->create_pipeline = meta_clip_effect_class_create_pipeline;
++  gobject_class->dispose = meta_clip_effect_dispose;
++}
++
++static void
++meta_clip_effect_init(MetaClipEffect *self)
++{
++  MetaClipEffectClass *klass = META_CLIP_EFFECT_GET_CLASS (self);
++  MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(self);
++
++  if (G_UNLIKELY (klass->base_pipeline == NULL))
++    {
++      CoglSnippet *snippet;
++      CoglContext *ctx =
++        clutter_backend_get_cogl_context (clutter_get_default_backend ());
++
++      klass->base_pipeline = cogl_pipeline_new (ctx);
++
++      snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_FRAGMENT,
++                                  ROUNDED_CLIP_FRAGMENT_SHADER_DECLARATIONS,
++                                  ROUNDED_CLIP_FRAGMENT_SHADER_CODE);
++      cogl_pipeline_add_snippet (klass->base_pipeline, snippet);
++      cogl_object_unref (snippet);
++
++      cogl_pipeline_set_layer_null_texture (klass->base_pipeline, 0);
++    }
++
++  priv->pipeline = cogl_pipeline_copy (klass->base_pipeline);
++  priv->actor = NULL;
++}
++
++MetaClipEffect *meta_clip_effect_new(void)
++{
++  return g_object_new(META_TYPE_CLIP_EFFECT, NULL);
++}
++
++void
++meta_clip_effect_set_bounds(MetaClipEffect        *effect, 
++                            cairo_rectangle_int_t *_bounds,
++                            int                   padding[4])
++{
++  // padding: [left, right, top, bottom]
++
++  MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(effect);
++
++  g_return_if_fail(priv->pipeline && priv->actor);
++  float radius = meta_prefs_get_round_corner_radius();
++  float border = meta_prefs_get_border_width();
++  float brightness = meta_prefs_get_border_brightness();
++
++  priv->bounds.x = _bounds->x + padding[0];
++  priv->bounds.y = _bounds->y + padding[2];
++  priv->bounds.width =  _bounds->width  - padding[1] - padding[0];
++  priv->bounds.height = _bounds->height - padding[2] - padding[3];
++
++  float x1 = priv->bounds.x;
++  float y1 = priv->bounds.y;
++  float x2 = priv->bounds.width + x1;
++  float y2 = priv->bounds.height + y1;
++  float w, h;
++
++  clutter_actor_get_size(priv->actor, &w, &h);
++
++  int location_skip = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "skip");
++  int location_bounds = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "bounds");
++  int location_corner_centers_1 =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "corner_centers_1");
++  int location_corner_centers_2 =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "corner_centers_2");
++  int location_inner_bounds = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_bounds");
++  int location_inner_corner_centers_1 =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_corner_centers_1");
++  int location_inner_corner_centers_2 =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_corner_centers_2");
++  int location_pixel_step =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "pixel_step");
++  int location_border_width =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "border_width");
++  int location_border_brightness =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "border_brightness");
++
++
++  float bounds[] = { x1, y1, x2, y2 };
++  float corner_centers_1[] = {
++    x1 + radius,
++    y1 + radius,
++    x2 - radius,
++    y1 + radius
++  };
++  float corner_centers_2[] = {
++    x2 - radius,
++    y2 - radius,
++    x1 + radius,
++    y2 - radius
++  };
++  float inner_bounds[] = { x1 + border, y1 + border, x2 - border, y2 - border };
++  
++  float inner_corner_centers_1[] = {
++    x1 + radius,
++    y1 + radius,
++    x2 - radius,
++    y1 + radius
++  };
++  float inner_corner_centers_2[] = {
++    x2 - radius,
++    y2 - radius,
++    x1 + radius,
++    y2 - radius
++  };
++
++  float pixel_step[] = { 1. / w, 1. / h };
++
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_bounds,
++                                  4, 1, bounds);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_corner_centers_1,
++                                  4, 1, corner_centers_1);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_corner_centers_2,
++                                  4, 1, corner_centers_2);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_inner_bounds,
++                                  4, 1, inner_bounds);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_inner_corner_centers_1,
++                                  4, 1, inner_corner_centers_1);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_inner_corner_centers_2,
++                                  4, 1, inner_corner_centers_2);
++  cogl_pipeline_set_uniform_float(priv->pipeline,
++                                  location_pixel_step,
++                                  2, 1, pixel_step);
++  cogl_pipeline_set_uniform_1i(priv->pipeline, location_skip, 0);
++  cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_width, border);
++  cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_brightness, brightness);
++}
++
++void
++meta_clip_effect_skip(MetaClipEffect *effect)
++{
++  MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(effect);
++
++  g_return_if_fail(priv->pipeline && priv->actor);
++
++  int location_skip = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "skip");
++
++  cogl_pipeline_set_uniform_1i(priv->pipeline, location_skip, 1);
++}
++
++void
++meta_clip_effect_get_bounds(MetaClipEffect        *effect,
++                            cairo_rectangle_int_t *bounds)
++{
++  MetaClipEffectPrivate *priv = meta_clip_effect_get_instance_private(effect);
++  *bounds = priv->bounds;
++}
+diff --git a/src/meta_clip_effect.h b/src/meta_clip_effect.h
+new file mode 100644
+index 0000000000..ab20b10871
+--- /dev/null
++++ b/src/meta_clip_effect.h
+@@ -0,0 +1,20 @@
++// for 40.4
++
++#pragma once
++
++#include <clutter/clutter.h>
++
++#define META_TYPE_CLIP_EFFECT (meta_clip_effect_get_type())
++G_DECLARE_DERIVABLE_TYPE(MetaClipEffect, meta_clip_effect, META, CLIP_EFFECT, ClutterOffscreenEffect)
++
++struct _MetaClipEffectClass {
++  ClutterOffscreenEffectClass parent_class;
++  CoglPipeline *base_pipeline;
++  gpointer padding[12];
++};
++
++MetaClipEffect *meta_clip_effect_new(void);
++
++void meta_clip_effect_set_bounds(MetaClipEffect *effect, cairo_rectangle_int_t *bounds, int padding[4]);
++void meta_clip_effect_get_bounds(MetaClipEffect *effect, cairo_rectangle_int_t *bounds);
++void meta_clip_effect_skip(MetaClipEffect *effect);
+\ No newline at end of file
+diff --git a/src/shader.h b/src/shader.h
+new file mode 100644
+index 0000000000..95ea686b00
+--- /dev/null
++++ b/src/shader.h
+@@ -0,0 +1,142 @@
++#pragma once
++
++/*
++ * copied from src/compositor/meta-background-content.c
++ * 
++ * The ellipsis_dist(), ellipsis_coverage() and rounded_rect_coverage() are
++ * copied from GSK, see gsk_ellipsis_dist(), gsk_ellipsis_coverage(), and
++ * gsk_rounded_rect_coverage() here:
++ * https://gitlab.gnome.org/GNOME/gtk/-/blob/master/gsk/resources/glsl/preamble.fs.glsl
++ *
++ */
++#define ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS                                   \
++"                                                                         \n"\
++"float                                                                    \n"\
++"ellipsis_dist (vec2 p, vec2 radius)                                      \n"\
++"{                                                                        \n"\
++"  if (radius == vec2(0, 0))                                              \n"\
++"    return 0.0;                                                          \n"\
++"                                                                         \n"\
++"  vec2 p0 = p / radius;                                                  \n"\
++"  vec2 p1 = (2.0 * p0) / radius;                                         \n"\
++"                                                                         \n"\
++"  return (dot(p0, p0) - 1.0) / length (p1);                              \n"\
++"}                                                                        \n"\
++"                                                                         \n"\
++"float                                                                    \n"\
++"ellipsis_coverage (vec2 point, vec2 center, vec2 radius)                 \n"\
++"{                                                                        \n"\
++"  float d = ellipsis_dist ((point - center), radius);                    \n"\
++"  return clamp (0.5 - d, 0.0, 1.0);                                      \n"\
++"}                                                                        \n"\
++"                                                                         \n"\
++"float                                                                    \n"\
++"rounded_rect_coverage (vec4 bounds,                                      \n"\
++"                       vec4 corner_centers_1,                            \n"\
++"                       vec4 corner_centers_2,                            \n"\
++"                       vec2 p)                                           \n"\
++"{                                                                        \n"\
++"  if (p.x < bounds.x || p.y < bounds.y ||                                \n"\
++"      p.x >= bounds.z || p.y >= bounds.w)                                \n"\
++"    return 0.0;                                                          \n"\
++"                                                                         \n"\
++"  vec2 ref_tl = corner_centers_1.xy;                                     \n"\
++"  vec2 ref_tr = corner_centers_1.zw;                                     \n"\
++"  vec2 ref_br = corner_centers_2.xy;                                     \n"\
++"  vec2 ref_bl = corner_centers_2.zw;                                     \n"\
++"                                                                         \n"\
++"  if (p.x >= ref_tl.x && p.x >= ref_bl.x &&                              \n"\
++"      p.x <= ref_tr.x && p.x <= ref_br.x)                                \n"\
++"    return 1.0;                                                          \n"\
++"                                                                         \n"\
++"  if (p.y >= ref_tl.y && p.y >= ref_tr.y &&                              \n"\
++"      p.y <= ref_bl.y && p.y <= ref_br.y)                                \n"\
++"    return 1.0;                                                          \n"\
++"                                                                         \n"\
++"  vec2 rad_tl = corner_centers_1.xy - bounds.xy;                         \n"\
++"  vec2 rad_tr = corner_centers_1.zw - bounds.zy;                         \n"\
++"  vec2 rad_br = corner_centers_2.xy - bounds.zw;                         \n"\
++"  vec2 rad_bl = corner_centers_2.zw - bounds.xw;                         \n"\
++"                                                                         \n"\
++"  float d_tl = ellipsis_coverage(p, ref_tl, rad_tl);                     \n"\
++"  float d_tr = ellipsis_coverage(p, ref_tr, rad_tr);                     \n"\
++"  float d_br = ellipsis_coverage(p, ref_br, rad_br);                     \n"\
++"  float d_bl = ellipsis_coverage(p, ref_bl, rad_bl);                     \n"\
++"                                                                         \n"\
++"  vec4 corner_coverages = 1.0 - vec4(d_tl, d_tr, d_br, d_bl);            \n"\
++"                                                                         \n"\
++"  bvec4 is_out = bvec4(p.x < ref_tl.x && p.y < ref_tl.y,                 \n"\
++"                       p.x > ref_tr.x && p.y < ref_tr.y,                 \n"\
++"                       p.x > ref_br.x && p.y > ref_br.y,                 \n"\
++"                       p.x < ref_bl.x && p.y > ref_bl.y);                \n"\
++"                                                                         \n"\
++"  return 1.0 - dot(vec4(is_out), corner_coverages);                      \n"\
++"}                                                                        \n"
++
++#define ROUNDED_CLIP_FRAGMENT_SHADER_VARS                                    \
++"uniform vec4 bounds;           // x, y: top left; w, v: bottom right     \n"\
++"uniform vec4 corner_centers_1; // x, y: top left; w, v: top right        \n"\
++"uniform vec4 corner_centers_2; // x, y: bottom right; w, v: bottom left  \n"\
++"uniform vec4 inner_bounds;                                               \n"\
++"uniform vec4 inner_corner_centers_1;                                     \n"\
++"uniform vec4 inner_corner_centers_2;                                     \n"\
++"uniform vec2 pixel_step;                                                 \n"\
++"uniform int skip;                                                        \n"\
++"uniform float border_width;                                              \n"\
++"uniform float border_brightness;                                         \n"
++
++/* used by src/meta_clip_effect.c  */
++#define ROUNDED_CLIP_FRAGMENT_SHADER_DECLARATIONS                            \
++ROUNDED_CLIP_FRAGMENT_SHADER_VARS                                            \
++ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
++
++/* used by src/meta_clip_effect.c  */
++#define ROUNDED_CLIP_FRAGMENT_SHADER_CODE                                    \
++"if (skip == 0) {                                                         \n"\
++"  vec2 texture_coord = cogl_tex_coord0_in.xy / pixel_step;               \n"\
++"                                                                         \n"\
++"  float outer_alpha = rounded_rect_coverage (bounds,                     \n"\
++"                                             corner_centers_1,           \n"\
++"                                             corner_centers_2,           \n"\
++"                                             texture_coord);             \n"\
++"  if (border_width > 0.0) {                                              \n"\
++"    float inner_alpha = rounded_rect_coverage (inner_bounds,             \n"\
++"                                               inner_corner_centers_1,   \n"\
++"                                               inner_corner_centers_2,   \n"\
++"                                               texture_coord);           \n"\
++"    float border_alpha = clamp (outer_alpha - inner_alpha, 0.0, 1.0)     \n"\
++"                       * cogl_color_out.a;                               \n"\
++"                                                                         \n"\
++"    cogl_color_out *= smoothstep (0.0, 0.6, inner_alpha);                \n"\
++"    cogl_color_out = mix (cogl_color_out,                                \n"\
++"                          vec4(vec3(border_brightness), 1.0),            \n"\
++"                          border_alpha);                                 \n"\
++"  } else {                                                               \n"\
++"    cogl_color_out = cogl_color_out * outer_alpha;                       \n"\
++"  }                                                                      \n"\
++"}                                                                        \n"
++
++#define ROUNDED_CLIP_FRAGMENT_SHADER_VARS_BLUR                               \
++"uniform vec4 bounds;           // x, y: top left; w, v: bottom right     \n"\
++"uniform vec4 corner_centers_1; // x, y: top left; w, v: top right        \n"\
++"uniform vec4 corner_centers_2; // x, y: bottom right; w, v: bottom left  \n"\
++"uniform vec2 pixel_step;                                                 \n"\
++"uniform int skip;                                                        \n"\
++"uniform float brightness;                                                \n"
++
++/* used by shell-blur-effect.c */
++#define ROUNDED_CLIP_FRAGMENT_SHADER_DECLARATIONS_BLUR                       \
++ROUNDED_CLIP_FRAGMENT_SHADER_VARS_BLUR                                       \
++ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
++
++/* used by shell-blur-effect.c */
++#define ROUNDED_CLIP_FRAGMENT_SHADER_CODE_BLUR                               \
++"if (skip == 0) {                                                         \n"\
++"  vec2 texture_coord = cogl_tex_coord0_in.xy / pixel_step;               \n"\
++"                                                                         \n"\
++"  cogl_color_out *= rounded_rect_coverage (bounds,                       \n"\
++"                                           corner_centers_1,             \n"\
++"                                           corner_centers_2,             \n"\
++"                                           texture_coord);               \n"\
++"}                                                                        \n"\
++"cogl_color_out.rgb *= brightness;                                        \n"
+diff --git a/src/shell-blur-effect.c b/src/shell-blur-effect.c
+new file mode 100644
+index 0000000000..36d4c5ede9
+--- /dev/null
++++ b/src/shell-blur-effect.c
+@@ -0,0 +1,971 @@
++/* shell-blur-effect.c
++ *
++ * Copyright 2019 Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#include "shell-blur-effect.h"
++
++#include "shell-enum-types.h"
++
++#include "meta/prefs.h"
++#include "shader.h"
++
++/**
++ * SECTION:shell-blur-effect
++ * @short_description: Blur effect for actors
++ *
++ * #ShellBlurEffect is a blur implementation based on Clutter. It also has
++ * an optional brightness property.
++ *
++ * # Modes
++ *
++ * #ShellBlurEffect can work in @SHELL_BLUR_MODE_BACKGROUND and @SHELL_BLUR_MODE_ACTOR
++ * modes. The actor mode blurs the actor itself, and all of its children. The
++ * background mode blurs the pixels beneath the actor, but not the actor itself.
++ *
++ * @SHELL_BLUR_MODE_BACKGROUND can be computationally expensive, since the contents
++ * beneath the actor cannot be cached, so beware of the performance implications
++ * of using this blur mode.
++ */
++
++#define MIN_DOWNSCALE_SIZE 256.f
++#define MAX_SIGMA 6.f
++
++typedef enum
++{
++  ACTOR_PAINTED = 1 << 0,
++  BLUR_APPLIED = 1 << 1,
++} CacheFlags;
++
++typedef struct
++{
++  CoglFramebuffer *framebuffer;
++  CoglPipeline *pipeline;
++  CoglTexture *texture;
++} FramebufferData;
++
++struct _MetaShellBlurEffect
++{
++  ClutterEffect parent_instance;
++
++  ClutterActor *actor;
++
++  unsigned int tex_width;
++  unsigned int tex_height;
++
++  /* The cached contents */
++  FramebufferData actor_fb;
++  CacheFlags cache_flags;
++
++  FramebufferData background_fb;
++  FramebufferData brightness_fb;
++  int brightness_uniform;
++  int bounds_uniform;
++  int corner_centers_1_uniform;
++  int corner_centers_2_uniform;
++  int pixel_step_uniform;
++  int skip_uniform;
++  gboolean skip;
++
++  ShellBlurMode mode;
++  float downscale_factor;
++  float brightness;
++  int sigma;
++};
++
++G_DEFINE_TYPE (MetaShellBlurEffect, meta_shell_blur_effect, CLUTTER_TYPE_EFFECT)
++
++enum {
++  PROP_0,
++  PROP_SIGMA,
++  PROP_BRIGHTNESS,
++  PROP_MODE,
++  N_PROPS
++};
++
++static GParamSpec *properties [N_PROPS] = { NULL, };
++
++static CoglPipeline*
++create_base_pipeline (void)
++{
++  static CoglPipeline *base_pipeline = NULL;
++
++  if (G_UNLIKELY (base_pipeline == NULL))
++    {
++      CoglContext *ctx =
++        clutter_backend_get_cogl_context (clutter_get_default_backend ());
++
++      base_pipeline = cogl_pipeline_new (ctx);
++      cogl_pipeline_set_layer_null_texture (base_pipeline, 0);
++      cogl_pipeline_set_layer_filters (base_pipeline,
++                                       0,
++                                       COGL_PIPELINE_FILTER_LINEAR,
++                                       COGL_PIPELINE_FILTER_LINEAR);
++      cogl_pipeline_set_layer_wrap_mode (base_pipeline,
++                                         0,
++                                         COGL_PIPELINE_WRAP_MODE_CLAMP_TO_EDGE);
++    }
++
++  return cogl_pipeline_copy (base_pipeline);
++}
++
++static CoglPipeline*
++create_brightness_pipeline (void)
++{
++  static CoglPipeline *brightness_pipeline = NULL;
++
++  if (G_UNLIKELY (brightness_pipeline == NULL))
++    {
++      CoglSnippet *snippet;
++
++      brightness_pipeline = create_base_pipeline ();
++
++      snippet = cogl_snippet_new (COGL_SNIPPET_HOOK_FRAGMENT,
++                                  ROUNDED_CLIP_FRAGMENT_SHADER_DECLARATIONS_BLUR,
++                                  ROUNDED_CLIP_FRAGMENT_SHADER_CODE_BLUR);
++      cogl_pipeline_add_snippet (brightness_pipeline, snippet);
++      cogl_object_unref (snippet);
++    }
++
++  return cogl_pipeline_copy (brightness_pipeline);
++}
++
++
++static void
++update_brightness (MetaShellBlurEffect *self,
++                   uint8_t          paint_opacity)
++{
++  cogl_pipeline_set_color4ub (self->brightness_fb.pipeline,
++                              paint_opacity,
++                              paint_opacity,
++                              paint_opacity,
++                              paint_opacity);
++
++  if (self->brightness_uniform > -1)
++    {
++      cogl_pipeline_set_uniform_1i (self->brightness_fb.pipeline,
++                                    self->skip_uniform, self->skip);
++      cogl_pipeline_set_uniform_1f (self->brightness_fb.pipeline,
++                                    self->brightness_uniform,
++                                    self->brightness);
++      if (self->skip)
++        return;
++
++      float width  = self->tex_width;
++      float height = self->tex_height;
++      float radius = meta_prefs_get_round_corner_radius();
++      float bounds[] = { 0.0, 0.0, width, height };
++      float corner_centers_1[] = {
++        radius,
++        radius,
++        width - radius,
++        radius
++      };
++      float corner_centers_2[] = {
++        width - radius,
++        height - radius,
++        radius,
++        height - radius
++      };
++      float pixel_step[] = { 1.0 / width, 1.0 / height };
++
++      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
++                                      self->bounds_uniform,
++                                      4, 1, bounds);
++      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
++                                      self->corner_centers_1_uniform,
++                                      4, 1, corner_centers_1);
++      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
++                                      self->corner_centers_2_uniform,
++                                      4, 1, corner_centers_2);
++      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
++                                      self->pixel_step_uniform,
++                                      2, 1, pixel_step);
++    }
++}
++
++static void
++setup_projection_matrix (CoglFramebuffer *framebuffer,
++                         float            width,
++                         float            height)
++{
++  graphene_matrix_t projection;
++
++  graphene_matrix_init_translate (&projection,
++                                  &GRAPHENE_POINT3D_INIT (-width / 2.0,
++                                                          -height / 2.0,
++                                                          0.f));
++  graphene_matrix_scale (&projection, 2.0 / width, -2.0 / height, 1.f);
++
++  cogl_framebuffer_set_projection_matrix (framebuffer, &projection);
++}
++
++static gboolean
++update_fbo (FramebufferData *data,
++            unsigned int     width,
++            unsigned int     height,
++            float            downscale_factor)
++{
++  CoglContext *ctx =
++    clutter_backend_get_cogl_context (clutter_get_default_backend ());
++
++  g_clear_pointer (&data->texture, cogl_object_unref);
++  g_clear_object (&data->framebuffer);
++
++  float new_width = floorf (width / downscale_factor);
++  float new_height = floorf (height / downscale_factor);
++
++  data->texture = cogl_texture_2d_new_with_size (ctx, new_width, new_height);
++  if (!data->texture)
++    return FALSE;
++
++  cogl_pipeline_set_layer_texture (data->pipeline, 0, data->texture);
++
++  data->framebuffer =
++    COGL_FRAMEBUFFER (cogl_offscreen_new_with_texture (data->texture));
++  if (!data->framebuffer)
++    {
++      g_warning ("%s: Unable to create an Offscreen buffer", G_STRLOC);
++      return FALSE;
++    }
++
++  setup_projection_matrix (data->framebuffer, new_width, new_height);
++
++  return TRUE;
++}
++
++static gboolean
++update_actor_fbo (MetaShellBlurEffect *self,
++                  unsigned int     width,
++                  unsigned int     height,
++                  float            downscale_factor)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->downscale_factor == downscale_factor &&
++      self->actor_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  self->cache_flags &= ~ACTOR_PAINTED;
++
++  return update_fbo (&self->actor_fb, width, height, downscale_factor);
++}
++
++static gboolean
++update_brightness_fbo (MetaShellBlurEffect *self,
++                       unsigned int     width,
++                       unsigned int     height,
++                       float            downscale_factor)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->downscale_factor == downscale_factor &&
++      self->brightness_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  return update_fbo (&self->brightness_fb,
++                     width, height,
++                     downscale_factor);
++}
++
++static gboolean
++update_background_fbo (MetaShellBlurEffect *self,
++                       unsigned int     width,
++                       unsigned int     height)
++{
++  if (self->tex_width == width &&
++      self->tex_height == height &&
++      self->background_fb.framebuffer)
++    {
++      return TRUE;
++    }
++
++  return update_fbo (&self->background_fb, width, height, 1.0);
++}
++
++static void
++clear_framebuffer_data (FramebufferData *fb_data)
++{
++  g_clear_pointer (&fb_data->texture, cogl_object_unref);
++  g_clear_object (&fb_data->framebuffer);
++}
++
++static float
++calculate_downscale_factor (float width,
++                            float height,
++                            float sigma)
++{
++  float downscale_factor = 1.0;
++  float scaled_width = width;
++  float scaled_height = height;
++  float scaled_sigma = sigma;
++
++  /* This is the algorithm used by Firefox; keep downscaling until either the
++   * blur radius is lower than the threshold, or the downscaled texture is too
++   * small.
++   */
++  while (scaled_sigma > MAX_SIGMA &&
++         scaled_width > MIN_DOWNSCALE_SIZE &&
++         scaled_height > MIN_DOWNSCALE_SIZE)
++    {
++      downscale_factor *= 2.f;
++
++      scaled_width = width / downscale_factor;
++      scaled_height = height / downscale_factor;
++      scaled_sigma = sigma / downscale_factor;
++    }
++
++  return downscale_factor;
++}
++
++static void
++shell_blur_effect_set_actor (ClutterActorMeta *meta,
++                             ClutterActor     *actor)
++{
++  MetaShellBlurEffect *self = META_SHELL_BLUR_EFFECT (meta);
++  ClutterActorMetaClass *meta_class;
++
++  meta_class = CLUTTER_ACTOR_META_CLASS (meta_shell_blur_effect_parent_class);
++  meta_class->set_actor (meta, actor);
++
++  /* clear out the previous state */
++  clear_framebuffer_data (&self->actor_fb);
++  clear_framebuffer_data (&self->background_fb);
++  clear_framebuffer_data (&self->brightness_fb);
++
++  /* we keep a back pointer here, to avoid going through the ActorMeta */
++  self->actor = clutter_actor_meta_get_actor (meta);
++}
++
++static void
++update_actor_box (MetaShellBlurEffect     *self,
++                  ClutterPaintContext *paint_context,
++                  ClutterActorBox     *source_actor_box)
++{
++  ClutterStageView *stage_view;
++  float box_scale_factor = 1.0f;
++  float origin_x, origin_y;
++  float width, height;
++
++  switch (self->mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      clutter_actor_get_allocation_box (self->actor, source_actor_box);
++      break;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++      stage_view = clutter_paint_context_get_stage_view (paint_context);
++
++      clutter_actor_get_transformed_position (self->actor, &origin_x, &origin_y);
++      clutter_actor_get_transformed_size (self->actor, &width, &height);
++
++      if (stage_view)
++        {
++          cairo_rectangle_int_t stage_view_layout;
++
++          box_scale_factor = clutter_stage_view_get_scale (stage_view);
++          clutter_stage_view_get_layout (stage_view, &stage_view_layout);
++
++          origin_x -= stage_view_layout.x;
++          origin_y -= stage_view_layout.y;
++        }
++      else
++        {
++          /* If we're drawing off stage, just assume scale = 1, this won't work
++           * with stage-view scaling though.
++           */
++        }
++
++      clutter_actor_box_set_origin (source_actor_box, origin_x, origin_y);
++      clutter_actor_box_set_size (source_actor_box, width, height);
++
++      clutter_actor_box_scale (source_actor_box, box_scale_factor);
++      break;
++    }
++
++  clutter_actor_box_clamp_to_pixel (source_actor_box);
++}
++
++static void
++add_blurred_pipeline (MetaShellBlurEffect  *self,
++                      ClutterPaintNode *node,
++                      uint8_t           paint_opacity)
++{
++  g_autoptr (ClutterPaintNode) pipeline_node = NULL;
++  float width, height;
++
++  /* Use the untransformed actor size here, since the framebuffer itself already
++   * has the actor transform matrix applied.
++   */
++  clutter_actor_get_size (self->actor, &width, &height);
++
++  update_brightness (self, paint_opacity);
++
++  pipeline_node = clutter_pipeline_node_new (self->brightness_fb.pipeline);
++  clutter_paint_node_set_static_name (pipeline_node, "ShellBlurEffect (final)");
++  clutter_paint_node_add_child (node, pipeline_node);
++
++  clutter_paint_node_add_rectangle (pipeline_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      width,
++                                      height,
++                                    });
++}
++
++static ClutterPaintNode *
++create_blur_nodes (MetaShellBlurEffect  *self,
++                   ClutterPaintNode *node,
++                   uint8_t           paint_opacity)
++{
++  g_autoptr (ClutterPaintNode) brightness_node = NULL;
++  g_autoptr (ClutterPaintNode) blur_node = NULL;
++  float width;
++  float height;
++
++  clutter_actor_get_size (self->actor, &width, &height);
++
++  update_brightness (self, paint_opacity);
++  brightness_node = clutter_layer_node_new_to_framebuffer (self->brightness_fb.framebuffer,
++                                                           self->brightness_fb.pipeline);
++  clutter_paint_node_set_static_name (brightness_node, "ShellBlurEffect (brightness)");
++  clutter_paint_node_add_child (node, brightness_node);
++  clutter_paint_node_add_rectangle (brightness_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      width, height,
++                                    });
++
++  blur_node = clutter_blur_node_new (self->tex_width / self->downscale_factor,
++                                     self->tex_height / self->downscale_factor,
++                                     self->sigma / self->downscale_factor);
++  clutter_paint_node_set_static_name (blur_node, "ShellBlurEffect (blur)");
++  clutter_paint_node_add_child (brightness_node, blur_node);
++  clutter_paint_node_add_rectangle (blur_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      cogl_texture_get_width (self->brightness_fb.texture),
++                                      cogl_texture_get_height (self->brightness_fb.texture),
++                                    });
++
++  self->cache_flags |= BLUR_APPLIED;
++
++  return g_steal_pointer (&blur_node);
++}
++
++static void
++paint_background (MetaShellBlurEffect     *self,
++                  ClutterPaintNode    *node,
++                  ClutterPaintContext *paint_context,
++                  ClutterActorBox     *source_actor_box)
++{
++  g_autoptr (ClutterPaintNode) background_node = NULL;
++  g_autoptr (ClutterPaintNode) blit_node = NULL;
++  CoglFramebuffer *src;
++  float transformed_x;
++  float transformed_y;
++  float transformed_width;
++  float transformed_height;
++
++  clutter_actor_box_get_origin (source_actor_box,
++                                &transformed_x,
++                                &transformed_y);
++  clutter_actor_box_get_size (source_actor_box,
++                              &transformed_width,
++                              &transformed_height);
++
++  /* Background layer node */
++  background_node =
++    clutter_layer_node_new_to_framebuffer (self->background_fb.framebuffer,
++                                           self->background_fb.pipeline);
++  clutter_paint_node_set_static_name (background_node, "ShellBlurEffect (background)");
++  clutter_paint_node_add_child (node, background_node);
++  clutter_paint_node_add_rectangle (background_node,
++                                    &(ClutterActorBox) {
++                                      0.f, 0.f,
++                                      self->tex_width / self->downscale_factor,
++                                      self->tex_height / self->downscale_factor,
++                                    });
++
++  /* Blit node */
++  src = clutter_paint_context_get_framebuffer (paint_context);
++  blit_node = clutter_blit_node_new (src);
++  clutter_paint_node_set_static_name (blit_node, "ShellBlurEffect (blit)");
++  clutter_paint_node_add_child (background_node, blit_node);
++  clutter_blit_node_add_blit_rectangle (CLUTTER_BLIT_NODE (blit_node),
++                                        transformed_x,
++                                        transformed_y,
++                                        0, 0,
++                                        transformed_width,
++                                        transformed_height);
++}
++
++static gboolean
++update_framebuffers (MetaShellBlurEffect     *self,
++                     ClutterPaintContext *paint_context,
++                     ClutterActorBox     *source_actor_box)
++{
++  gboolean updated = FALSE;
++  float downscale_factor;
++  float height = -1;
++  float width = -1;
++
++  clutter_actor_box_get_size (source_actor_box, &width, &height);
++
++  downscale_factor = calculate_downscale_factor (width, height, self->sigma);
++
++  updated = update_actor_fbo (self, width, height, downscale_factor) &&
++            update_brightness_fbo (self, width, height, downscale_factor);
++
++  if (self->mode == SHELL_BLUR_MODE_BACKGROUND)
++    updated = updated && update_background_fbo (self, width, height);
++
++  self->tex_width = width;
++  self->tex_height = height;
++  self->downscale_factor = downscale_factor;
++
++  return updated;
++}
++
++static void
++add_actor_node (MetaShellBlurEffect  *self,
++                ClutterPaintNode *node,
++                int               opacity)
++{
++  g_autoptr (ClutterPaintNode) actor_node = NULL;
++
++  actor_node = clutter_actor_node_new (self->actor, opacity);
++  clutter_paint_node_add_child (node, actor_node);
++}
++
++static void
++paint_actor_offscreen (MetaShellBlurEffect         *self,
++                       ClutterPaintNode        *node,
++                       ClutterEffectPaintFlags  flags)
++{
++  gboolean actor_dirty;
++
++  actor_dirty = (flags & CLUTTER_EFFECT_PAINT_ACTOR_DIRTY) != 0;
++
++  /* The actor offscreen framebuffer is updated already */
++  if (actor_dirty || !(self->cache_flags & ACTOR_PAINTED))
++    {
++      g_autoptr (ClutterPaintNode) transform_node = NULL;
++      g_autoptr (ClutterPaintNode) layer_node = NULL;
++      graphene_matrix_t transform;
++
++      /* Layer node */
++      layer_node = clutter_layer_node_new_to_framebuffer (self->actor_fb.framebuffer,
++                                                          self->actor_fb.pipeline);
++      clutter_paint_node_set_static_name (layer_node, "ShellBlurEffect (actor offscreen)");
++      clutter_paint_node_add_child (node, layer_node);
++      clutter_paint_node_add_rectangle (layer_node,
++                                        &(ClutterActorBox) {
++                                          0.f, 0.f,
++                                          self->tex_width / self->downscale_factor,
++                                          self->tex_height / self->downscale_factor,
++                                        });
++
++      /* Transform node */
++      graphene_matrix_init_scale (&transform,
++                                  1.f / self->downscale_factor,
++                                  1.f / self->downscale_factor,
++                                  1.f);
++      transform_node = clutter_transform_node_new (&transform);
++      clutter_paint_node_set_static_name (transform_node, "ShellBlurEffect (downscale)");
++      clutter_paint_node_add_child (layer_node, transform_node);
++
++      /* Actor node */
++      add_actor_node (self, transform_node, 255);
++
++      self->cache_flags |= ACTOR_PAINTED;
++    }
++  else
++    {
++      g_autoptr (ClutterPaintNode) pipeline_node = NULL;
++
++      pipeline_node = clutter_pipeline_node_new (self->actor_fb.pipeline);
++      clutter_paint_node_set_static_name (pipeline_node,
++                                          "ShellBlurEffect (actor texture)");
++      clutter_paint_node_add_child (node, pipeline_node);
++      clutter_paint_node_add_rectangle (pipeline_node,
++                                        &(ClutterActorBox) {
++                                          0.f, 0.f,
++                                          self->tex_width / self->downscale_factor,
++                                          self->tex_height / self->downscale_factor,
++                                        });
++    }
++}
++
++static gboolean
++needs_repaint (MetaShellBlurEffect         *self,
++               ClutterEffectPaintFlags  flags)
++{
++  gboolean actor_cached;
++  gboolean blur_cached;
++  gboolean actor_dirty;
++
++  actor_dirty = (flags & CLUTTER_EFFECT_PAINT_ACTOR_DIRTY) != 0;
++  blur_cached = (self->cache_flags & BLUR_APPLIED) != 0;
++  actor_cached = (self->cache_flags & ACTOR_PAINTED) != 0;
++
++  switch (self->mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      return actor_dirty || !blur_cached || !actor_cached;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++      return TRUE;
++    }
++
++  return TRUE;
++}
++
++static void
++shell_blur_effect_paint_node (ClutterEffect           *effect,
++                              ClutterPaintNode        *node,
++                              ClutterPaintContext     *paint_context,
++                              ClutterEffectPaintFlags  flags)
++{
++  MetaShellBlurEffect *self = META_SHELL_BLUR_EFFECT (effect);
++  uint8_t paint_opacity;
++
++  g_assert (self->actor != NULL);
++
++  if (self->sigma > 0)
++    {
++      g_autoptr (ClutterPaintNode) blur_node = NULL;
++
++      switch (self->mode)
++        {
++        case SHELL_BLUR_MODE_ACTOR:
++          paint_opacity = clutter_actor_get_paint_opacity (self->actor);
++          break;
++
++        case SHELL_BLUR_MODE_BACKGROUND:
++          paint_opacity = 255;
++          break;
++
++        default:
++          g_assert_not_reached();
++          break;
++        }
++
++      if (needs_repaint (self, flags))
++        {
++          ClutterActorBox source_actor_box;
++
++          update_actor_box (self, paint_context, &source_actor_box);
++
++          /* Failing to create or update the offscreen framebuffers prevents
++           * the entire effect to be applied.
++           */
++          if (!update_framebuffers (self, paint_context, &source_actor_box))
++            goto fail;
++
++          blur_node = create_blur_nodes (self, node, paint_opacity);
++
++          switch (self->mode)
++            {
++            case SHELL_BLUR_MODE_ACTOR:
++              paint_actor_offscreen (self, blur_node, flags);
++              break;
++
++            case SHELL_BLUR_MODE_BACKGROUND:
++              paint_background (self, blur_node, paint_context, &source_actor_box);
++              break;
++            }
++        }
++      else
++        {
++          /* Use the cached pipeline if no repaint is needed */
++          add_blurred_pipeline (self, node, paint_opacity);
++        }
++
++      /* Background blur needs to paint the actor after painting the blurred
++       * background.
++       */
++      switch (self->mode)
++        {
++        case SHELL_BLUR_MODE_ACTOR:
++          break;
++
++        case SHELL_BLUR_MODE_BACKGROUND:
++          add_actor_node (self, node, -1);
++          break;
++        }
++
++      return;
++    }
++
++fail:
++  /* When no blur is applied, or the offscreen framebuffers
++   * couldn't be created, fallback to simply painting the actor.
++   */
++  add_actor_node (self, node, -1);
++}
++
++static void
++shell_blur_effect_finalize (GObject *object)
++{
++  MetaShellBlurEffect *self = (MetaShellBlurEffect *)object;
++
++  clear_framebuffer_data (&self->actor_fb);
++  clear_framebuffer_data (&self->background_fb);
++  clear_framebuffer_data (&self->brightness_fb);
++
++  g_clear_pointer (&self->actor_fb.pipeline, cogl_object_unref);
++  g_clear_pointer (&self->background_fb.pipeline, cogl_object_unref);
++  g_clear_pointer (&self->brightness_fb.pipeline, cogl_object_unref);
++
++  G_OBJECT_CLASS (meta_shell_blur_effect_parent_class)->finalize (object);
++}
++
++static void
++shell_blur_effect_get_property (GObject    *object,
++                                guint       prop_id,
++                                GValue     *value,
++                                GParamSpec *pspec)
++{
++  MetaShellBlurEffect *self = META_SHELL_BLUR_EFFECT (object);
++
++  switch (prop_id)
++    {
++    case PROP_SIGMA:
++      g_value_set_int (value, self->sigma);
++      break;
++
++    case PROP_BRIGHTNESS:
++      g_value_set_float (value, self->brightness);
++      break;
++
++    case PROP_MODE:
++      g_value_set_enum (value, self->mode);
++      break;
++
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++shell_blur_effect_set_property (GObject      *object,
++                                guint         prop_id,
++                                const GValue *value,
++                                GParamSpec   *pspec)
++{
++  MetaShellBlurEffect *self = META_SHELL_BLUR_EFFECT (object);
++
++  switch (prop_id)
++    {
++    case PROP_SIGMA:
++      meta_shell_blur_effect_set_sigma (self, g_value_get_int (value));
++      break;
++
++    case PROP_BRIGHTNESS:
++      meta_shell_blur_effect_set_brightness (self, g_value_get_float (value));
++      break;
++
++    case PROP_MODE:
++      meta_shell_blur_effect_set_mode (self, g_value_get_enum (value));
++      break;
++
++    default:
++      G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
++    }
++}
++
++static void
++meta_shell_blur_effect_class_init (MetaShellBlurEffectClass *klass)
++{
++  GObjectClass *object_class = G_OBJECT_CLASS (klass);
++  ClutterActorMetaClass *meta_class = CLUTTER_ACTOR_META_CLASS (klass);
++  ClutterEffectClass *effect_class = CLUTTER_EFFECT_CLASS (klass);
++
++  object_class->finalize = shell_blur_effect_finalize;
++  object_class->get_property = shell_blur_effect_get_property;
++  object_class->set_property = shell_blur_effect_set_property;
++
++  meta_class->set_actor = shell_blur_effect_set_actor;
++
++  effect_class->paint_node = shell_blur_effect_paint_node;
++
++  properties[PROP_SIGMA] =
++    g_param_spec_int ("sigma",
++                      "Sigma",
++                      "Sigma",
++                      0, G_MAXINT, 0,
++                      G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  properties[PROP_BRIGHTNESS] =
++    g_param_spec_float ("brightness",
++                        "Brightness",
++                        "Brightness",
++                        0.f, 1.f, 1.f,
++                        G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  properties[PROP_MODE] =
++    g_param_spec_enum ("mode",
++                       "Blur mode",
++                       "Blur mode",
++                       SHELL_TYPE_BLUR_MODE,
++                       SHELL_BLUR_MODE_ACTOR,
++                       G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS);
++
++  g_object_class_install_properties (object_class, N_PROPS, properties);
++}
++
++static void
++meta_shell_blur_effect_init (MetaShellBlurEffect *self)
++{
++  self->mode = SHELL_BLUR_MODE_ACTOR;
++  self->sigma = 0;
++  self->brightness = 1.f;
++  self->skip = false;
++
++  self->actor_fb.pipeline = create_base_pipeline ();
++  self->background_fb.pipeline = create_base_pipeline ();
++  self->brightness_fb.pipeline = create_brightness_pipeline ();
++  self->brightness_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "brightness");
++  self->bounds_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "bounds");
++  self->corner_centers_1_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "corner_centers_1");
++  self->corner_centers_2_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "corner_centers_2");
++  self->pixel_step_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "pixel_step");
++  self->skip_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "skip");
++
++}
++
++MetaShellBlurEffect *
++meta_shell_blur_effect_new (void)
++{
++  return g_object_new (META_SHELL_TYPE_BLUR_EFFECT, NULL);
++}
++
++int
++meta_shell_blur_effect_get_sigma (MetaShellBlurEffect *self)
++{
++  g_return_val_if_fail (META_IS_SHELL_BLUR_EFFECT (self), -1);
++
++  return self->sigma;
++}
++
++void
++meta_shell_blur_effect_set_sigma (MetaShellBlurEffect *self,
++                             int              sigma)
++{
++  g_return_if_fail (META_IS_SHELL_BLUR_EFFECT (self));
++
++  if (self->sigma == sigma)
++    return;
++
++  self->sigma = sigma;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_SIGMA]);
++}
++
++float
++meta_shell_blur_effect_get_brightness (MetaShellBlurEffect *self)
++{
++  g_return_val_if_fail (META_IS_SHELL_BLUR_EFFECT (self), FALSE);
++
++  return self->brightness;
++}
++
++void
++meta_shell_blur_effect_set_brightness (MetaShellBlurEffect *self,
++                                  float            brightness)
++{
++  g_return_if_fail (META_IS_SHELL_BLUR_EFFECT (self));
++
++  if (self->brightness == brightness)
++    return;
++
++  self->brightness = brightness;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_BRIGHTNESS]);
++}
++
++ShellBlurMode
++meta_shell_blur_effect_get_mode (MetaShellBlurEffect *self)
++{
++  g_return_val_if_fail (META_IS_SHELL_BLUR_EFFECT (self), -1);
++
++  return self->mode;
++}
++
++void
++meta_shell_blur_effect_set_mode (MetaShellBlurEffect *self,
++                            ShellBlurMode    mode)
++{
++  g_return_if_fail (META_IS_SHELL_BLUR_EFFECT (self));
++
++  if (self->mode == mode)
++    return;
++
++  self->mode = mode;
++  self->cache_flags &= ~BLUR_APPLIED;
++
++  switch (mode)
++    {
++    case SHELL_BLUR_MODE_ACTOR:
++      clear_framebuffer_data (&self->background_fb);
++      break;
++
++    case SHELL_BLUR_MODE_BACKGROUND:
++    default:
++      /* Do nothing */
++      break;
++    }
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++
++  g_object_notify_by_pspec (G_OBJECT (self), properties[PROP_MODE]);
++}
++
++void meta_shell_blur_effect_set_skip (MetaShellBlurEffect *self,
++                                      gboolean skip)
++{
++  g_return_if_fail (META_IS_SHELL_BLUR_EFFECT (self));
++
++  if (self->skip == skip)
++    return;
++
++  self->skip = skip;
++
++  if (self->actor)
++    clutter_effect_queue_repaint (CLUTTER_EFFECT (self));
++}
+diff --git a/src/shell-blur-effect.h b/src/shell-blur-effect.h
+new file mode 100644
+index 0000000000..bc89c00e92
+--- /dev/null
++++ b/src/shell-blur-effect.h
+@@ -0,0 +1,64 @@
++/* shell-blur-effect.h
++ *
++ * Copyright 2019 Georges Basile Stavracas Neto <georges.stavracas@gmail.com>
++ *
++ * This program is free software: you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation, either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program.  If not, see <http://www.gnu.org/licenses/>.
++ *
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ */
++
++#pragma once
++
++/*
++ * have to rename the type, to avoide conflicts with gnome shell
++ */ 
++
++#include <clutter/clutter.h>
++
++G_BEGIN_DECLS
++
++/**
++ * ShellBlurMode:
++ * @SHELL_BLUR_MODE_ACTOR: blur the actor contents, and its children
++ * @SHELL_BLUR_MODE_BACKGROUND: blur what's beneath the actor
++ *
++ * The mode of blurring of the effect.
++ */
++typedef enum
++{
++  SHELL_BLUR_MODE_ACTOR,
++  SHELL_BLUR_MODE_BACKGROUND,
++} ShellBlurMode;
++
++#define META_SHELL_TYPE_BLUR_EFFECT (meta_shell_blur_effect_get_type())
++G_DECLARE_FINAL_TYPE (MetaShellBlurEffect, meta_shell_blur_effect, META, SHELL_BLUR_EFFECT, ClutterEffect)
++
++MetaShellBlurEffect *meta_shell_blur_effect_new (void);
++
++int meta_shell_blur_effect_get_sigma (MetaShellBlurEffect *self);
++void meta_shell_blur_effect_set_sigma (MetaShellBlurEffect *self,
++                                       int              sigma);
++
++float meta_shell_blur_effect_get_brightness (MetaShellBlurEffect *self);
++void meta_shell_blur_effect_set_brightness (MetaShellBlurEffect *self,
++                                            float            brightness);
++
++ShellBlurMode meta_shell_blur_effect_get_mode (MetaShellBlurEffect *self);
++void meta_shell_blur_effect_set_mode (MetaShellBlurEffect *self,
++                                      ShellBlurMode    mode);
++
++void meta_shell_blur_effect_set_skip (MetaShellBlurEffect *self,
++                                      gboolean skip);
++
++G_END_DECLS
+diff --git a/src/ui/frames.c b/src/ui/frames.c
+index cf90d477bb..f82d653fdf 100644
+--- a/src/ui/frames.c
++++ b/src/ui/frames.c
+@@ -711,6 +711,27 @@ meta_ui_frame_get_bounds (MetaUIFrame *frame)
+   return get_visible_region (frame, &fgeom);
+ }
+ 
++cairo_region_t * 
++meta_ui_frame_get_bounds_clipped (const MetaRectangle *bounds,
++                                  float radius)
++{
++  MetaFrameGeometry fgeom;
++ 
++  fgeom.borders.invisible.left = bounds->x;
++  fgeom.borders.invisible.top =  bounds->y;
++  fgeom.borders.invisible.bottom = 0;
++  fgeom.borders.invisible.right =  0;
++  fgeom.width  = bounds->width + bounds->x;
++  fgeom.height = bounds->height + bounds->y;
++
++  fgeom.top_left_corner_rounded_radius = radius;
++  fgeom.top_right_corner_rounded_radius = radius;
++  fgeom.bottom_left_corner_rounded_radius = radius;
++  fgeom.bottom_right_corner_rounded_radius = radius;
++  
++  return get_visible_region (NULL, &fgeom);
++}
++
+ void
+ meta_ui_frame_move_resize (MetaUIFrame *frame,
+                            int x, int y, int width, int height)
+diff --git a/src/ui/frames.h b/src/ui/frames.h
+index 89b3992650..8262f04465 100644
+--- a/src/ui/frames.h
++++ b/src/ui/frames.h
+@@ -139,6 +139,10 @@ void meta_ui_frame_get_borders (MetaUIFrame      *frame,
+ 
+ cairo_region_t * meta_ui_frame_get_bounds (MetaUIFrame *frame);
+ 
++cairo_region_t * 
++meta_ui_frame_get_bounds_clipped (const MetaRectangle *bounds,
++                                  float radius);
++
+ void meta_ui_frame_get_mask (MetaUIFrame           *frame,
+                              cairo_rectangle_int_t *frame_rect,
+                              cairo_t               *cr);
+diff --git a/src/ui/frames.h.orig b/src/ui/frames.h.orig
+new file mode 100644
+index 0000000000..89b3992650
+--- /dev/null
++++ b/src/ui/frames.h.orig
+@@ -0,0 +1,153 @@
++/* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
++
++/* Metacity window frame manager widget */
++
++/*
++ * Copyright (C) 2001 Havoc Pennington
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License as
++ * published by the Free Software Foundation; either version 2 of the
++ * License, or (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful, but
++ * WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
++ * General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License
++ * along with this program; if not, see <http://www.gnu.org/licenses/>.
++ */
++
++#ifndef META_FRAMES_H
++#define META_FRAMES_H
++
++#include <gtk/gtk.h>
++#include <gdk/gdkx.h>
++
++#include "meta/common.h"
++#include "meta/types.h"
++#include "ui/theme-private.h"
++#include "ui/ui.h"
++
++typedef enum
++{
++  META_FRAME_CONTROL_NONE,
++  META_FRAME_CONTROL_TITLE,
++  META_FRAME_CONTROL_DELETE,
++  META_FRAME_CONTROL_MENU,
++  META_FRAME_CONTROL_MINIMIZE,
++  META_FRAME_CONTROL_MAXIMIZE,
++  META_FRAME_CONTROL_UNMAXIMIZE,
++  META_FRAME_CONTROL_RESIZE_SE,
++  META_FRAME_CONTROL_RESIZE_S,
++  META_FRAME_CONTROL_RESIZE_SW,
++  META_FRAME_CONTROL_RESIZE_N,
++  META_FRAME_CONTROL_RESIZE_NE,
++  META_FRAME_CONTROL_RESIZE_NW,
++  META_FRAME_CONTROL_RESIZE_W,
++  META_FRAME_CONTROL_RESIZE_E,
++  META_FRAME_CONTROL_CLIENT_AREA
++} MetaFrameControl;
++
++/* This is one widget that manages all the window frames
++ * as subwindows.
++ */
++
++#define META_TYPE_FRAMES            (meta_frames_get_type ())
++#define META_FRAMES(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_FRAMES, MetaFrames))
++#define META_FRAMES_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), META_TYPE_FRAMES, MetaFramesClass))
++#define META_IS_FRAMES(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_FRAMES))
++#define META_IS_FRAMES_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), META_TYPE_FRAMES))
++#define META_FRAMES_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), META_TYPE_FRAMES, MetaFramesClass))
++
++typedef struct _MetaFrames        MetaFrames;
++typedef struct _MetaFramesClass   MetaFramesClass;
++
++struct _MetaUIFrame
++{
++  MetaFrames *frames;
++  MetaWindow *meta_window;
++  Window xwindow;
++  GdkWindow *window;
++  MetaStyleInfo *style_info;
++  MetaFrameLayout *cache_layout;
++  PangoLayout *text_layout;
++  int text_height;
++  char *title; /* NULL once we have a layout */
++  guint maybe_ignore_leave_notify : 1;
++
++  /* FIXME get rid of this, it can just be in the MetaFrames struct */
++  MetaFrameControl prelit_control;
++  MetaButtonState button_state;
++  int grab_button;
++
++  gboolean is_frozen;
++};
++
++struct _MetaFrames
++{
++  GtkWindow parent_instance;
++
++  MetaX11Display *x11_display;
++
++  GHashTable *text_heights;
++
++  GHashTable *frames;
++
++  MetaStyleInfo *normal_style;
++  GHashTable *style_variants;
++
++  MetaGrabOp current_grab_op;
++  MetaUIFrame *grab_frame;
++  guint grab_button;
++  gdouble grab_x;
++  gdouble grab_y;
++
++  ClutterEventSequence *grab_touch;
++
++  float last_click_x;
++  float last_click_y;
++  uint32_t last_click_time;
++  int click_count;
++};
++
++struct _MetaFramesClass
++{
++  GtkWindowClass parent_class;
++
++};
++
++GType        meta_frames_get_type               (void) G_GNUC_CONST;
++
++MetaFrames * meta_frames_new (MetaX11Display *x11_display);
++
++MetaUIFrame * meta_frames_manage_window (MetaFrames *frames,
++                                         MetaWindow *meta_window,
++                                         Window      xwindow,
++                                         GdkWindow  *window);
++
++void meta_ui_frame_unmanage (MetaUIFrame *frame);
++
++void meta_ui_frame_set_title (MetaUIFrame *frame,
++                              const char *title);
++
++void meta_ui_frame_update_style (MetaUIFrame *frame);
++
++void meta_ui_frame_get_borders (MetaUIFrame      *frame,
++                                MetaFrameBorders *borders);
++
++cairo_region_t * meta_ui_frame_get_bounds (MetaUIFrame *frame);
++
++void meta_ui_frame_get_mask (MetaUIFrame           *frame,
++                             cairo_rectangle_int_t *frame_rect,
++                             cairo_t               *cr);
++
++void meta_ui_frame_move_resize (MetaUIFrame *frame,
++                                int x, int y, int width, int height);
++
++void meta_ui_frame_queue_draw (MetaUIFrame *frame);
++
++gboolean meta_ui_frame_handle_event (MetaUIFrame *frame, const ClutterEvent *event);
++
++#endif
+diff --git a/src/wayland/meta-window-wayland.c b/src/wayland/meta-window-wayland.c
+index 2b389bfbf8..cbd04cc419 100644
+--- a/src/wayland/meta-window-wayland.c
++++ b/src/wayland/meta-window-wayland.c
+@@ -1073,6 +1073,9 @@ meta_window_wayland_finish_move_resize (MetaWindow              *window,
+     gravity = META_GRAVITY_STATIC;
+   meta_window_move_resize_internal (window, flags, gravity, rect);
+ 
++  if (flags & META_MOVE_RESIZE_RESIZE_ACTION)
++    meta_window_actor_update_glsl(meta_window_actor_from_window(window));
++
+   g_clear_pointer (&acked_configuration, meta_wayland_window_configuration_free);
+ }
+ 
+diff --git a/src/meta_clip_effect.c b/src/meta_clip_effect.c
+index 931bd72226..6f3f488fd1 100644
+--- a/src/meta_clip_effect.c
++++ b/src/meta_clip_effect.c
+@@ -8,6 +8,15 @@ typedef struct {
+   CoglPipeline *pipeline;
+   ClutterActor *actor;
+   cairo_rectangle_int_t bounds;
++
++  int bounds_uniform;
++  int clip_radius_uniform;
++  int inner_bounds_uniform;
++  int inner_clip_radius_uniform;
++  int pixel_step_uniform;
++  int skip_uniform;
++  int border_width_uniform;
++  int border_brightness_uniform;
+ } MetaClipEffectPrivate;
+ 
+ G_DEFINE_TYPE_WITH_PRIVATE(MetaClipEffect, meta_clip_effect, CLUTTER_TYPE_OFFSCREEN_EFFECT)
+@@ -109,6 +118,24 @@ meta_clip_effect_init(MetaClipEffect *self)
+ 
+   priv->pipeline = cogl_pipeline_copy (klass->base_pipeline);
+   priv->actor = NULL;
++
++  // get location of uniforms from shader
++  priv->bounds_uniform = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "bounds");
++  priv->clip_radius_uniform =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "clip_radius");
++  priv->inner_bounds_uniform = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_bounds");
++  priv->inner_clip_radius_uniform =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_clip_radius");
++  priv->pixel_step_uniform =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "pixel_step");
++  priv->skip_uniform = 
++    cogl_pipeline_get_uniform_location(priv->pipeline, "skip");
++  priv->border_width_uniform =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "border_width");
++  priv->border_brightness_uniform =
++    cogl_pipeline_get_uniform_location(priv->pipeline, "border_brightness");
+ }
+ 
+ MetaClipEffect *meta_clip_effect_new(void)
+@@ -143,82 +170,34 @@ meta_clip_effect_set_bounds(MetaClipEffect        *effect,
+ 
+   clutter_actor_get_size(priv->actor, &w, &h);
+ 
+-  int location_skip = 
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "skip");
+-  int location_bounds = 
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "bounds");
+-  int location_corner_centers_1 =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "corner_centers_1");
+-  int location_corner_centers_2 =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "corner_centers_2");
+-  int location_inner_bounds = 
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_bounds");
+-  int location_inner_corner_centers_1 =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_corner_centers_1");
+-  int location_inner_corner_centers_2 =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "inner_corner_centers_2");
+-  int location_pixel_step =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "pixel_step");
+-  int location_border_width =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "border_width");
+-  int location_border_brightness =
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "border_brightness");
+-
+-
+   float bounds[] = { x1, y1, x2, y2 };
+-  float corner_centers_1[] = {
+-    x1 + radius,
+-    y1 + radius,
+-    x2 - radius,
+-    y1 + radius
+-  };
+-  float corner_centers_2[] = {
+-    x2 - radius,
+-    y2 - radius,
+-    x1 + radius,
+-    y2 - radius
+-  };
+-  float inner_bounds[] = { x1 + border, y1 + border, x2 - border, y2 - border };
+   
+-  float inner_corner_centers_1[] = {
+-    x1 + radius,
+-    y1 + radius,
+-    x2 - radius,
+-    y1 + radius
+-  };
+-  float inner_corner_centers_2[] = {
+-    x2 - radius,
+-    y2 - radius,
+-    x1 + radius,
+-    y2 - radius
+-  };
++  float inner_bounds[] = { x1 + border, y1 + border, x2 - border, y2 - border };
++  float inner_radius = radius - border;
++  if (inner_radius < 0.0f) {
++    inner_radius = 0.0f;
++  }
+ 
+   float pixel_step[] = { 1. / w, 1. / h };
+ 
+   cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_bounds,
++                                  priv->bounds_uniform,
+                                   4, 1, bounds);
++  cogl_pipeline_set_uniform_1f(priv->pipeline,
++                                  priv->clip_radius_uniform,
++                                  radius);
+   cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_corner_centers_1,
+-                                  4, 1, corner_centers_1);
+-  cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_corner_centers_2,
+-                                  4, 1, corner_centers_2);
+-  cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_inner_bounds,
++                                  priv->inner_bounds_uniform,
+                                   4, 1, inner_bounds);
++  cogl_pipeline_set_uniform_1f(priv->pipeline,
++                               priv->inner_clip_radius_uniform,
++                               inner_radius);
+   cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_inner_corner_centers_1,
+-                                  4, 1, inner_corner_centers_1);
+-  cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_inner_corner_centers_2,
+-                                  4, 1, inner_corner_centers_2);
+-  cogl_pipeline_set_uniform_float(priv->pipeline,
+-                                  location_pixel_step,
++                                  priv->pixel_step_uniform,
+                                   2, 1, pixel_step);
+-  cogl_pipeline_set_uniform_1i(priv->pipeline, location_skip, 0);
+-  cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_width, border);
+-  cogl_pipeline_set_uniform_1f(priv->pipeline, location_border_brightness, brightness);
++  cogl_pipeline_set_uniform_1i(priv->pipeline, priv->skip_uniform, 0);
++  cogl_pipeline_set_uniform_1f(priv->pipeline, priv->border_width_uniform, border);
++  cogl_pipeline_set_uniform_1f(priv->pipeline, priv->border_brightness_uniform, brightness);
+ }
+ 
+ void
+@@ -228,10 +207,7 @@ meta_clip_effect_skip(MetaClipEffect *effect)
+ 
+   g_return_if_fail(priv->pipeline && priv->actor);
+ 
+-  int location_skip = 
+-    cogl_pipeline_get_uniform_location(priv->pipeline, "skip");
+-
+-  cogl_pipeline_set_uniform_1i(priv->pipeline, location_skip, 1);
++  cogl_pipeline_set_uniform_1i(priv->pipeline, priv->skip_uniform, 1);
+ }
+ 
+ void
+diff --git a/src/shader.h b/src/shader.h
+index 95ea686b00..6a3340fcce 100644
+--- a/src/shader.h
++++ b/src/shader.h
+@@ -2,84 +2,62 @@
+ 
+ /*
+  * copied from src/compositor/meta-background-content.c
+- * 
+- * The ellipsis_dist(), ellipsis_coverage() and rounded_rect_coverage() are
+- * copied from GSK, see gsk_ellipsis_dist(), gsk_ellipsis_coverage(), and
+- * gsk_rounded_rect_coverage() here:
+- * https://gitlab.gnome.org/GNOME/gtk/-/blob/master/gsk/resources/glsl/preamble.fs.glsl
+- *
++ * see: https://gitlab.gnome.org/GNOME/mutter/-/blob/858b5c12b1f55043964c2e2bd30de8cf112e76d2/src/compositor/meta-background-content.c#L138
+  */
+ #define ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS                                   \
+-"                                                                         \n"\
+ "float                                                                    \n"\
+-"ellipsis_dist (vec2 p, vec2 radius)                                      \n"\
++"rounded_rect_coverage (vec2 p, vec4 bounds, float clip_radius)           \n"\
+ "{                                                                        \n"\
+-"  if (radius == vec2(0, 0))                                              \n"\
++"  // Outside the bounds                                                  \n"\
++"  if (p.x < bounds.x || p.x > bounds.z                                   \n"\
++"     || p.y < bounds.y || p.y > bounds.w ) {                             \n"\
+ "    return 0.0;                                                          \n"\
++"  }                                                                      \n"\
++"  float center_left  = bounds.x + clip_radius;                           \n"\
++"  float center_right = bounds.z - clip_radius;                           \n"\
++"  float center_x;                                                        \n"\
++"                                                                         \n"\
++"  if (p.x < center_left)                                                 \n"\
++"    center_x = center_left;                                              \n"\
++"  else if (p.x > center_right)                                           \n"\
++"    center_x = center_right;                                             \n"\
++"  else                                                                   \n"\
++"    return 1.0; // The vast majority of pixels exit early here           \n"\
++"                                                                         \n"\
++"  float center_top    = bounds.y + clip_radius;                          \n"\
++"  float center_bottom = bounds.w - clip_radius;                          \n"\
++"  float center_y;                                                        \n"\
++"                                                                         \n"\
++"  if (p.y < center_top)                                                  \n"\
++"    center_y = center_top;                                               \n"\
++"  else if (p.y > center_bottom)                                          \n"\
++"    center_y = center_bottom;                                            \n"\
++"  else                                                                   \n"\
++"    return 1.0;                                                          \n"\
+ "                                                                         \n"\
+-"  vec2 p0 = p / radius;                                                  \n"\
+-"  vec2 p1 = (2.0 * p0) / radius;                                         \n"\
+-"                                                                         \n"\
+-"  return (dot(p0, p0) - 1.0) / length (p1);                              \n"\
+-"}                                                                        \n"\
+-"                                                                         \n"\
+-"float                                                                    \n"\
+-"ellipsis_coverage (vec2 point, vec2 center, vec2 radius)                 \n"\
+-"{                                                                        \n"\
+-"  float d = ellipsis_dist ((point - center), radius);                    \n"\
+-"  return clamp (0.5 - d, 0.0, 1.0);                                      \n"\
+-"}                                                                        \n"\
++"  vec2 delta = p - vec2 (center_x, center_y);                            \n"\
++"  float dist_squared = dot (delta, delta);                               \n"\
+ "                                                                         \n"\
+-"float                                                                    \n"\
+-"rounded_rect_coverage (vec4 bounds,                                      \n"\
+-"                       vec4 corner_centers_1,                            \n"\
+-"                       vec4 corner_centers_2,                            \n"\
+-"                       vec2 p)                                           \n"\
+-"{                                                                        \n"\
+-"  if (p.x < bounds.x || p.y < bounds.y ||                                \n"\
+-"      p.x >= bounds.z || p.y >= bounds.w)                                \n"\
++"  // Fully outside the circle                                            \n"\
++"  float outer_radius = clip_radius + 0.5;                                \n"\
++"  if (dist_squared >= (outer_radius * outer_radius))                     \n"\
+ "    return 0.0;                                                          \n"\
+ "                                                                         \n"\
+-"  vec2 ref_tl = corner_centers_1.xy;                                     \n"\
+-"  vec2 ref_tr = corner_centers_1.zw;                                     \n"\
+-"  vec2 ref_br = corner_centers_2.xy;                                     \n"\
+-"  vec2 ref_bl = corner_centers_2.zw;                                     \n"\
+-"                                                                         \n"\
+-"  if (p.x >= ref_tl.x && p.x >= ref_bl.x &&                              \n"\
+-"      p.x <= ref_tr.x && p.x <= ref_br.x)                                \n"\
+-"    return 1.0;                                                          \n"\
+-"                                                                         \n"\
+-"  if (p.y >= ref_tl.y && p.y >= ref_tr.y &&                              \n"\
+-"      p.y <= ref_bl.y && p.y <= ref_br.y)                                \n"\
++"  // Fully inside the circle                                             \n"\
++"  float inner_radius = clip_radius - 0.5;                                \n"\
++"  if (dist_squared <= (inner_radius * inner_radius))                     \n"\
+ "    return 1.0;                                                          \n"\
+ "                                                                         \n"\
+-"  vec2 rad_tl = corner_centers_1.xy - bounds.xy;                         \n"\
+-"  vec2 rad_tr = corner_centers_1.zw - bounds.zy;                         \n"\
+-"  vec2 rad_br = corner_centers_2.xy - bounds.zw;                         \n"\
+-"  vec2 rad_bl = corner_centers_2.zw - bounds.xw;                         \n"\
+ "                                                                         \n"\
+-"  float d_tl = ellipsis_coverage(p, ref_tl, rad_tl);                     \n"\
+-"  float d_tr = ellipsis_coverage(p, ref_tr, rad_tr);                     \n"\
+-"  float d_br = ellipsis_coverage(p, ref_br, rad_br);                     \n"\
+-"  float d_bl = ellipsis_coverage(p, ref_bl, rad_bl);                     \n"\
+-"                                                                         \n"\
+-"  vec4 corner_coverages = 1.0 - vec4(d_tl, d_tr, d_br, d_bl);            \n"\
+-"                                                                         \n"\
+-"  bvec4 is_out = bvec4(p.x < ref_tl.x && p.y < ref_tl.y,                 \n"\
+-"                       p.x > ref_tr.x && p.y < ref_tr.y,                 \n"\
+-"                       p.x > ref_br.x && p.y > ref_br.y,                 \n"\
+-"                       p.x < ref_bl.x && p.y > ref_bl.y);                \n"\
+-"                                                                         \n"\
+-"  return 1.0 - dot(vec4(is_out), corner_coverages);                      \n"\
++"  // Only pixels on the edge of the curve need expensive antialiasing    \n"\
++"  return outer_radius - sqrt (dist_squared);                             \n"\
+ "}                                                                        \n"
+ 
+ #define ROUNDED_CLIP_FRAGMENT_SHADER_VARS                                    \
+-"uniform vec4 bounds;           // x, y: top left; w, v: bottom right     \n"\
+-"uniform vec4 corner_centers_1; // x, y: top left; w, v: top right        \n"\
+-"uniform vec4 corner_centers_2; // x, y: bottom right; w, v: bottom left  \n"\
++"uniform vec4 bounds;           // x, y: top left; z, w: bottom right     \n"\
++"uniform float clip_radius;                                               \n"\
+ "uniform vec4 inner_bounds;                                               \n"\
+-"uniform vec4 inner_corner_centers_1;                                     \n"\
+-"uniform vec4 inner_corner_centers_2;                                     \n"\
++"uniform float inner_clip_radius;                                         \n"\
+ "uniform vec2 pixel_step;                                                 \n"\
+ "uniform int skip;                                                        \n"\
+ "uniform float border_width;                                              \n"\
+@@ -95,15 +73,13 @@ ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
+ "if (skip == 0) {                                                         \n"\
+ "  vec2 texture_coord = cogl_tex_coord0_in.xy / pixel_step;               \n"\
+ "                                                                         \n"\
+-"  float outer_alpha = rounded_rect_coverage (bounds,                     \n"\
+-"                                             corner_centers_1,           \n"\
+-"                                             corner_centers_2,           \n"\
+-"                                             texture_coord);             \n"\
++"  float outer_alpha = rounded_rect_coverage (texture_coord,              \n"\
++"                                             bounds,                     \n"\
++"                                             clip_radius);               \n"\
+ "  if (border_width > 0.0) {                                              \n"\
+-"    float inner_alpha = rounded_rect_coverage (inner_bounds,             \n"\
+-"                                               inner_corner_centers_1,   \n"\
+-"                                               inner_corner_centers_2,   \n"\
+-"                                               texture_coord);           \n"\
++"    float inner_alpha = rounded_rect_coverage (texture_coord,            \n"\
++"                                               inner_bounds,             \n"\
++"                                               inner_clip_radius);       \n"\
+ "    float border_alpha = clamp (outer_alpha - inner_alpha, 0.0, 1.0)     \n"\
+ "                       * cogl_color_out.a;                               \n"\
+ "                                                                         \n"\
+@@ -118,8 +94,7 @@ ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
+ 
+ #define ROUNDED_CLIP_FRAGMENT_SHADER_VARS_BLUR                               \
+ "uniform vec4 bounds;           // x, y: top left; w, v: bottom right     \n"\
+-"uniform vec4 corner_centers_1; // x, y: top left; w, v: top right        \n"\
+-"uniform vec4 corner_centers_2; // x, y: bottom right; w, v: bottom left  \n"\
++"uniform float clip_radius;                                               \n"\
+ "uniform vec2 pixel_step;                                                 \n"\
+ "uniform int skip;                                                        \n"\
+ "uniform float brightness;                                                \n"
+@@ -134,9 +109,8 @@ ROUNDED_CLIP_FRAGMENT_SHADER_FUNCS
+ "if (skip == 0) {                                                         \n"\
+ "  vec2 texture_coord = cogl_tex_coord0_in.xy / pixel_step;               \n"\
+ "                                                                         \n"\
+-"  cogl_color_out *= rounded_rect_coverage (bounds,                       \n"\
+-"                                           corner_centers_1,             \n"\
+-"                                           corner_centers_2,             \n"\
+-"                                           texture_coord);               \n"\
++"  cogl_color_out *= rounded_rect_coverage (texture_coord,                \n"\
++"                                           bounds,                       \n"\
++"                                           clip_radius);                 \n"\
+ "}                                                                        \n"\
+ "cogl_color_out.rgb *= brightness;                                        \n"
+diff --git a/src/shell-blur-effect.c b/src/shell-blur-effect.c
+index 36d4c5ede9..98c10c8ace 100644
+--- a/src/shell-blur-effect.c
++++ b/src/shell-blur-effect.c
+@@ -76,8 +76,7 @@ struct _MetaShellBlurEffect
+   FramebufferData brightness_fb;
+   int brightness_uniform;
+   int bounds_uniform;
+-  int corner_centers_1_uniform;
+-  int corner_centers_2_uniform;
++  int clip_radius_uniform;
+   int pixel_step_uniform;
+   int skip_uniform;
+   gboolean skip;
+@@ -170,29 +169,14 @@ update_brightness (MetaShellBlurEffect *self,
+       float height = self->tex_height;
+       float radius = meta_prefs_get_round_corner_radius();
+       float bounds[] = { 0.0, 0.0, width, height };
+-      float corner_centers_1[] = {
+-        radius,
+-        radius,
+-        width - radius,
+-        radius
+-      };
+-      float corner_centers_2[] = {
+-        width - radius,
+-        height - radius,
+-        radius,
+-        height - radius
+-      };
+       float pixel_step[] = { 1.0 / width, 1.0 / height };
+ 
+       cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
+                                       self->bounds_uniform,
+                                       4, 1, bounds);
+-      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
+-                                      self->corner_centers_1_uniform,
+-                                      4, 1, corner_centers_1);
+-      cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
+-                                      self->corner_centers_2_uniform,
+-                                      4, 1, corner_centers_2);
++      cogl_pipeline_set_uniform_1f (self->brightness_fb.pipeline,
++                                    self->clip_radius_uniform,
++                                    radius);
+       cogl_pipeline_set_uniform_float (self->brightness_fb.pipeline,
+                                       self->pixel_step_uniform,
+                                       2, 1, pixel_step);
+@@ -849,10 +833,8 @@ meta_shell_blur_effect_init (MetaShellBlurEffect *self)
+     cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "brightness");
+   self->bounds_uniform =
+     cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "bounds");
+-  self->corner_centers_1_uniform =
+-    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "corner_centers_1");
+-  self->corner_centers_2_uniform =
+-    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "corner_centers_2");
++  self->clip_radius_uniform =
++    cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "clip_radius");
+   self->pixel_step_uniform =
+     cogl_pipeline_get_uniform_location (self->brightness_fb.pipeline, "pixel_step");
+   self->skip_uniform =
+
