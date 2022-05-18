@@ -2,7 +2,8 @@
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 # Contributor: Flamelab <panosfilip@gmail.com
 
-pkgname=gnome-shell
+pkgname=gnome-shell_n7n
+_pkgname=gnome-shell
 pkgver=42.1
 pkgrel=1
 epoch=1
@@ -22,7 +23,8 @@ optdepends=('gnome-control-center: System settings'
             'gst-plugins-good: Screen recording'
             'gst-plugin-pipewire: Screen recording')
 groups=(gnome)
-options=(debug)
+provides=(gnome-shell gnome-shell=$pkgver gnome-shell=$epoch:$pkgver)
+conflicts=(gnome-shell)
 _commit=bc533af73fdb6bce0c6c6a4a685af17272d23d50  # tags/42.1^0
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
@@ -56,7 +58,7 @@ build() {
   CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
   LDFLAGS+=" -Wl,-Bsymbolic-functions"
 
-  arch-meson gnome-shell build \
+  arch-meson $_pkgname build \
     -D gtk_doc=true \
     -D tests=false
   meson compile -C build
