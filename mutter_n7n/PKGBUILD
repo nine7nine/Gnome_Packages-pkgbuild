@@ -1,9 +1,13 @@
+# n7n package:
+# Maintainer: Jordan Johnston <johnstonljordan AT gmail DOT com>
+
+# Official package:
 # Maintainer: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
 # Contributor: Ionut Biru <ibiru@archlinux.org>
 # Contributor: Michael Kanis <mkanis_at_gmx_dot_de>
 
-pkgbase=mutter
-pkgname=(mutter mutter-docs)
+pkgbase=mutter_n7n
+pkgname=(mutter_n7n mutter_n7n-docs)
 pkgver=42.1
 pkgrel=1
 pkgdesc="A window manager for GNOME"
@@ -11,13 +15,12 @@ url="https://gitlab.gnome.org/GNOME/mutter"
 arch=(x86_64)
 license=(GPL)
 depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
-         libcanberra startup-notification zenity libsm gnome-desktop 
+         libcanberra startup-notification zenity libsm gnome-desktop
          libxkbcommon-x11 gnome-settings-daemon libgudev libinput pipewire
          xorg-xwayland graphene libxkbfile libsysprof-capture)
 makedepends=(gobject-introspection git egl-wayland meson xorg-server
              wayland-protocols sysprof gi-docgen)
 checkdepends=(xorg-server-xvfb wireplumber python-dbusmock)
-options=(debug)
 _commit=94bd385bf3ece2a746d8755049fc1fa5c8c0a808  # tags/42.1^0
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
         'mutter-blur-rounded_42.patch'
@@ -45,7 +48,7 @@ build() {
   CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
   LDFLAGS+=" -Wl,-Bsymbolic-functions"
 
-  arch-meson mutter build  \
+  arch-meson mutter build \
     -D egl_device=true \
     -D wayland_eglstream=true \
     -D docs=true \
@@ -63,15 +66,18 @@ _pick() {
   done
 }
 
-package_mutter() {
-  provides=(libmutter-10.so)
+package_mutter_n7n() {
+  provides=(mutter libmutter-10.so)
+  conflicts=(mutter)
   groups=(gnome)
 
   meson install -C build --destdir "$pkgdir"
   _pick docs "$pkgdir"/usr/share/mutter-*/doc
 }
 
-package_mutter-docs() {
+package_mutter_n7n-docs() {
+  provides=(mutter-docs)
+  conflicts=(mutter-docs)
   pkgdesc+=" (documentation)"
   depends=()
 
