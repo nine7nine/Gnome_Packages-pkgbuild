@@ -1,6 +1,8 @@
-- Arch packages + patches that i use for gnome 42
+# Gnome Packages (My Customized Packages Archlinux)
 
-# Gnome-Shell: 
+![My Image](/images/gnome-packages.png)
+
+## Gnome-Shell_n7n: 
 
  - This package disables Overview Mode entirely.
  - It also adds the Performance-related MRs (merge requests) from gitlab.
@@ -12,7 +14,7 @@ as Albert is less distracting anyway. (much more akin to Spotlight on MacOS, whi
 GS is a bit racy multi-touch gestures/input; it won't always release dragged windows going into Overview 
 Mode. Additionally, Gnome is much faster without GS Overview mode running, less hiccups under significant load...
 
-# Mutter: 
+## Mutter_n7n: 
 
  - This package package adds performance related MRs.
  - This package adds the mutter-rounded patches.
@@ -20,7 +22,7 @@ Mode. Additionally, Gnome is much faster without GS Overview mode running, less 
 This build of mutter pulls in the performance and mutter-rounded patches. Later I will adjust the defaults to match 
 my own tastes / configuration.
 
-# Gnome-Terminal-Lefty:
+## Gnome-Terminal-Lefty:
 
  - This package adds transparency to the terminal
  - This package contains a patch to move the scrollbar to the left-side (for left-handed Stylus/Tablet users. 
