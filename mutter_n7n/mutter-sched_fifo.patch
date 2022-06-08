@@ -1,0 +1,12 @@
+--- a/src/backends/native/meta-backend-native.c	2022-06-07 17:32:21.283237181 -0500
++++ b/src/backends/native/meta-backend-native.c	2022-06-07 17:43:05.896971459 -0500
+@@ -229,7 +229,7 @@ meta_backend_native_post_init (MetaBacke
+         {
+           uint32_t priority;
+ 
+-          priority = sched_get_priority_min (SCHED_RR);
++          priority = sched_get_priority_min (SCHED_FIFO);
+           meta_dbus_realtime_kit1_call_make_thread_realtime_sync (rtkit_proxy,
+                                                                   gettid (),
+                                                                   priority,
+

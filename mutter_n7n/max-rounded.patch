@@ -1,0 +1,315 @@
+From 76910f7a4631f4760c504e21e045da6699b52d20 Mon Sep 17 00:00:00 2001
+From: LuoYi <langisme@qq.com>
+Date: Sun, 24 Apr 2022 13:20:58 +0800
+Subject: [PATCH] Add config item: rounded-in-maximized
+
+---
+ data/org.gnome.mutter.gschema.xml.in |  10 +-
+ src/compositor/compositor.c          |   4 +
+ src/compositor/meta-window-actor.c   |   8 +-
+ src/core/prefs.c                     |  17 +++
+ src/meta/prefs.h                     |   4 +
+ src/ui/frames.h.orig                 | 153 ---------------------------
+ 6 files changed, 38 insertions(+), 158 deletions(-)
+ delete mode 100644 src/ui/frames.h.orig
+
+diff --git a/data/org.gnome.mutter.gschema.xml.in b/data/org.gnome.mutter.gschema.xml.in
+index f5f77c05da..692bd5c806 100644
+--- a/data/org.gnome.mutter.gschema.xml.in
++++ b/data/org.gnome.mutter.gschema.xml.in
+@@ -30,7 +30,7 @@
+     <key name="blur-window-opacity" type="i">
+       <default>80</default>
+       <range min="0" max="100"/>
+-      <summary>Blur brightness</summary>
++      <summary>Blur Window opacity</summary>
+     </key>
+ 
+     <key name="border-width" type="i">
+@@ -88,6 +88,14 @@
+       </description>
+     </key>
+ 
++    <key name="rounded-in-maximized" type="b">
++      <default>false</default>
++      <summary>Enable rounded corners when windows maximized</summary>
++      <description>
++        When true, the windows will always be clipped when be maximized.
++      </description>
++    </key>
++
+     <key name="overlay-key" type="s">
+       <default>'Super_L'</default>
+       <summary>Modifier to use for extended window management operations</summary>
+diff --git a/src/compositor/compositor.c b/src/compositor/compositor.c
+index dec3d63d51..ecc0725106 100644
+--- a/src/compositor/compositor.c
++++ b/src/compositor/compositor.c
+@@ -1149,6 +1149,10 @@ prefs_changed_cb(MetaPreference pref,
+     case META_PREF_BLUR_WINDOW_OPACITY:
+       meta_window_actor_update_blur_window_opacity (l->data);
+       break;
++    case META_PREF_ROUNDED_IN_MAXIMIZED:
++      meta_window_actor_update_glsl (l->data);
++      meta_window_actor_update_blur_position_size(l->data);
++      break;
+     default:
+       break;
+     }
+diff --git a/src/compositor/meta-window-actor.c b/src/compositor/meta-window-actor.c
+index de5775768c..a721737a2f 100644
+--- a/src/compositor/meta-window-actor.c
++++ b/src/compositor/meta-window-actor.c
+@@ -159,7 +159,7 @@ meta_window_actor_update_blur_position_size(MetaWindowActor *self)
+   meta_window_get_frame_rect (priv->window, &frame_rect);
+   meta_window_get_buffer_rect (priv->window, &buf_rect);
+ 
+-  if (meta_window_get_maximized (priv->window) ||
++  if ((meta_window_get_maximized (priv->window) && !meta_prefs_get_rounded_in_maximized()) ||
+       meta_window_is_fullscreen (priv->window))
+     {
+       clutter_actor_set_position (priv->blur_actor,
+@@ -324,9 +324,9 @@ meta_window_actor_should_clip(MetaWindowActor *self)
+ {
+   MetaWindowActorPrivate *priv = meta_window_actor_get_instance_private (self);
+ 
+-  return priv->should_clip && 
+-        !(meta_window_get_maximized(priv->window)||
+-          meta_window_is_fullscreen(priv->window)); 
++  return priv->should_clip  && 
++        !((meta_window_get_maximized(priv->window) && !meta_prefs_get_rounded_in_maximized())
++          || meta_window_is_fullscreen(priv->window)); 
+ }
+ 
+ void
+diff --git a/src/core/prefs.c b/src/core/prefs.c
+index 29bddc170b..1889b27a7f 100644
+--- a/src/core/prefs.c
++++ b/src/core/prefs.c
+@@ -128,6 +128,7 @@ static int border_brightness = 40;
+ static int blur_sigmal = 20;
+ static int blur_window_opacity = 80;
+ static int blur_brightness = 100;
++static gboolean rounded_in_maximized = FALSE;
+ static JsonNode *clip_edge_padding = NULL;
+ /* NULL-terminated array */
+ static char **black_list = NULL;
+@@ -415,6 +416,13 @@ static MetaBoolPreference preferences_bool[] =
+       },
+       &locate_pointer_is_enabled,
+     },
++    {
++      { "rounded-in-maximized",
++        SCHEMA_MUTTER,
++        META_PREF_ROUNDED_IN_MAXIMIZED,
++      },
++      &rounded_in_maximized,
++    },
+     { { NULL, 0, 0 }, NULL },
+   };
+ 
+@@ -1948,6 +1956,9 @@ meta_preference_to_string (MetaPreference pref)
+ 
+     case META_PREF_BLUR_WINDOW_OPACITY:
+       return "BLUR_WINDOW_OPACITY";
++
++    case META_PREF_ROUNDED_IN_MAXIMIZED:
++      return "ROUNDED_IN_MAXIMIZED";    
+     }
+ 
+   return "(unknown)";
+@@ -2495,6 +2506,12 @@ meta_prefs_get_blur_window_opacity(void)
+   return blur_window_opacity * 255 * 0.01;
+ }
+ 
++gboolean
++meta_prefs_get_rounded_in_maximized(void)
++{
++  return rounded_in_maximized;
++}
++
+ gboolean
+ meta_prefs_in_blur_list(const char *name)
+ {
+diff --git a/src/meta/prefs.h b/src/meta/prefs.h
+index 7d5d8f3471..f005f47e80 100644
+--- a/src/meta/prefs.h
++++ b/src/meta/prefs.h
+@@ -116,6 +116,7 @@ typedef enum
+   META_PREF_BLUR_BRIGHTNESS,
+   META_PREF_BLUR_LIST,
+   META_PREF_BLUR_WINDOW_OPACITY,
++  META_PREF_ROUNDED_IN_MAXIMIZED,
+ } MetaPreference;
+ 
+ typedef void (* MetaPrefsChangedFunc) (MetaPreference pref,
+@@ -267,6 +268,9 @@ double   meta_prefs_get_blur_brightness(void);
+ META_EXPORT
+ int      meta_prefs_get_blur_window_opacity(void);
+ 
++META_EXPORT
++gboolean meta_prefs_get_rounded_in_maximized(void);
++
+ META_EXPORT
+ gboolean meta_prefs_in_blur_list(const char *name);
+ 
+diff --git a/src/ui/frames.h.orig b/src/ui/frames.h.orig
+deleted file mode 100644
+index 89b3992650..0000000000
+--- a/src/ui/frames.h.orig
++++ /dev/null
+@@ -1,153 +0,0 @@
+-/* -*- mode: C; c-file-style: "gnu"; indent-tabs-mode: nil; -*- */
+-
+-/* Metacity window frame manager widget */
+-
+-/*
+- * Copyright (C) 2001 Havoc Pennington
+- *
+- * This program is free software; you can redistribute it and/or
+- * modify it under the terms of the GNU General Public License as
+- * published by the Free Software Foundation; either version 2 of the
+- * License, or (at your option) any later version.
+- *
+- * This program is distributed in the hope that it will be useful, but
+- * WITHOUT ANY WARRANTY; without even the implied warranty of
+- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+- * General Public License for more details.
+- *
+- * You should have received a copy of the GNU General Public License
+- * along with this program; if not, see <http://www.gnu.org/licenses/>.
+- */
+-
+-#ifndef META_FRAMES_H
+-#define META_FRAMES_H
+-
+-#include <gtk/gtk.h>
+-#include <gdk/gdkx.h>
+-
+-#include "meta/common.h"
+-#include "meta/types.h"
+-#include "ui/theme-private.h"
+-#include "ui/ui.h"
+-
+-typedef enum
+-{
+-  META_FRAME_CONTROL_NONE,
+-  META_FRAME_CONTROL_TITLE,
+-  META_FRAME_CONTROL_DELETE,
+-  META_FRAME_CONTROL_MENU,
+-  META_FRAME_CONTROL_MINIMIZE,
+-  META_FRAME_CONTROL_MAXIMIZE,
+-  META_FRAME_CONTROL_UNMAXIMIZE,
+-  META_FRAME_CONTROL_RESIZE_SE,
+-  META_FRAME_CONTROL_RESIZE_S,
+-  META_FRAME_CONTROL_RESIZE_SW,
+-  META_FRAME_CONTROL_RESIZE_N,
+-  META_FRAME_CONTROL_RESIZE_NE,
+-  META_FRAME_CONTROL_RESIZE_NW,
+-  META_FRAME_CONTROL_RESIZE_W,
+-  META_FRAME_CONTROL_RESIZE_E,
+-  META_FRAME_CONTROL_CLIENT_AREA
+-} MetaFrameControl;
+-
+-/* This is one widget that manages all the window frames
+- * as subwindows.
+- */
+-
+-#define META_TYPE_FRAMES            (meta_frames_get_type ())
+-#define META_FRAMES(obj)            (G_TYPE_CHECK_INSTANCE_CAST ((obj), META_TYPE_FRAMES, MetaFrames))
+-#define META_FRAMES_CLASS(klass)    (G_TYPE_CHECK_CLASS_CAST ((klass), META_TYPE_FRAMES, MetaFramesClass))
+-#define META_IS_FRAMES(obj)         (G_TYPE_CHECK_INSTANCE_TYPE ((obj), META_TYPE_FRAMES))
+-#define META_IS_FRAMES_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE ((klass), META_TYPE_FRAMES))
+-#define META_FRAMES_GET_CLASS(obj)  (G_TYPE_INSTANCE_GET_CLASS ((obj), META_TYPE_FRAMES, MetaFramesClass))
+-
+-typedef struct _MetaFrames        MetaFrames;
+-typedef struct _MetaFramesClass   MetaFramesClass;
+-
+-struct _MetaUIFrame
+-{
+-  MetaFrames *frames;
+-  MetaWindow *meta_window;
+-  Window xwindow;
+-  GdkWindow *window;
+-  MetaStyleInfo *style_info;
+-  MetaFrameLayout *cache_layout;
+-  PangoLayout *text_layout;
+-  int text_height;
+-  char *title; /* NULL once we have a layout */
+-  guint maybe_ignore_leave_notify : 1;
+-
+-  /* FIXME get rid of this, it can just be in the MetaFrames struct */
+-  MetaFrameControl prelit_control;
+-  MetaButtonState button_state;
+-  int grab_button;
+-
+-  gboolean is_frozen;
+-};
+-
+-struct _MetaFrames
+-{
+-  GtkWindow parent_instance;
+-
+-  MetaX11Display *x11_display;
+-
+-  GHashTable *text_heights;
+-
+-  GHashTable *frames;
+-
+-  MetaStyleInfo *normal_style;
+-  GHashTable *style_variants;
+-
+-  MetaGrabOp current_grab_op;
+-  MetaUIFrame *grab_frame;
+-  guint grab_button;
+-  gdouble grab_x;
+-  gdouble grab_y;
+-
+-  ClutterEventSequence *grab_touch;
+-
+-  float last_click_x;
+-  float last_click_y;
+-  uint32_t last_click_time;
+-  int click_count;
+-};
+-
+-struct _MetaFramesClass
+-{
+-  GtkWindowClass parent_class;
+-
+-};
+-
+-GType        meta_frames_get_type               (void) G_GNUC_CONST;
+-
+-MetaFrames * meta_frames_new (MetaX11Display *x11_display);
+-
+-MetaUIFrame * meta_frames_manage_window (MetaFrames *frames,
+-                                         MetaWindow *meta_window,
+-                                         Window      xwindow,
+-                                         GdkWindow  *window);
+-
+-void meta_ui_frame_unmanage (MetaUIFrame *frame);
+-
+-void meta_ui_frame_set_title (MetaUIFrame *frame,
+-                              const char *title);
+-
+-void meta_ui_frame_update_style (MetaUIFrame *frame);
+-
+-void meta_ui_frame_get_borders (MetaUIFrame      *frame,
+-                                MetaFrameBorders *borders);
+-
+-cairo_region_t * meta_ui_frame_get_bounds (MetaUIFrame *frame);
+-
+-void meta_ui_frame_get_mask (MetaUIFrame           *frame,
+-                             cairo_rectangle_int_t *frame_rect,
+-                             cairo_t               *cr);
+-
+-void meta_ui_frame_move_resize (MetaUIFrame *frame,
+-                                int x, int y, int width, int height);
+-
+-void meta_ui_frame_queue_draw (MetaUIFrame *frame);
+-
+-gboolean meta_ui_frame_handle_event (MetaUIFrame *frame, const ClutterEvent *event);
+-
+-#endif
+

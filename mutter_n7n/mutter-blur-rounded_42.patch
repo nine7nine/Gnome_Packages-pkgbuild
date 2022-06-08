@@ -1222,10 +1222,11 @@ index 1576ce551c..dec3d63d51 100644
  }
  
  void
-@@ -889,6 +896,20 @@ meta_compositor_sync_stack (MetaCompositor  *compositor,
+@@ -906,6 +913,20 @@ meta_compositor_sync_stack (MetaComposit
+     }
  
    sync_actor_stacking (compositor);
- 
++  
 +  MetaWorkspaceManager *manager = priv->display->workspace_manager;
 +  MetaWorkspace *active_workspace = manager->active_workspace;
 +
@@ -1239,10 +1240,9 @@ index 1576ce551c..dec3d63d51 100644
 +          meta_window_actor_update_blur_position_size(l->data);
 +        }
 +    }
-+
-   top_window_actor = get_top_visible_window_actor (compositor);
  
-   if (priv->top_window_actor == top_window_actor)
+   update_top_window_actor (compositor);
+ }
 @@ -919,7 +940,17 @@ meta_compositor_sync_window_geometry (MetaCompositor *compositor,
    changes = meta_window_actor_sync_actor_geometry (window_actor, did_placement);
  
