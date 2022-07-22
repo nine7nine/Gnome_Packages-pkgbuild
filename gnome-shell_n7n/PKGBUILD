@@ -4,7 +4,7 @@
 
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
-pkgver=42.2
+pkgver=42.3.1
 pkgrel=1
 epoch=1
 pkgdesc="Next generation desktop shell"
@@ -25,7 +25,7 @@ optdepends=('gnome-control-center: System settings'
 groups=(gnome)
 provides=(gnome-shell gnome-shell=$pkgver gnome-shell=$epoch:$pkgver)
 conflicts=(gnome-shell)
-_commit=c6a0f4ae7f05511db2a91174885041fb793f2422  # tags/42.2^0
+_commit=ed602bdc0f28f1547a2c39d1d7889aa25ea1677a  # tags/41.3.1^0
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
         'no_Overview_left_Clock.patch'
@@ -35,7 +35,7 @@ sha256sums=('SKIP'
             'SKIP'
             'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6'
             'da73e9bb8199135808e9cb7fa2b9aebd8ed4cfd215fffeb94d919de50e18ab73'
-            '70981733587a988b846b75e52077e5e986ddd38601667b037d1b0950304ea015')
+            '4a0cc365eab089a77f5fc2dafc8823b67c407f236409621d321637bec4125712')
 
 pkgver() {
   cd gnome-shell
@@ -55,8 +55,8 @@ prepare() {
 }
 
 build() {
-  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition -flto=auto -flto-partition=one -fdevirtualize-at-ltrans"
-  LDFLAGS+=" -Wl,-Bsymbolic-functions -flto=auto -flto-partition=one -fdevirtualize-at-ltrans"
+  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
+  LDFLAGS+=" -Wl,-Bsymbolic-functions"
 
   arch-meson $_pkgname build \
     -D gtk_doc=true \

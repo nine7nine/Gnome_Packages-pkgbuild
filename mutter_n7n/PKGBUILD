@@ -8,7 +8,7 @@
 
 pkgbase=mutter_n7n
 pkgname=(mutter_n7n mutter_n7n-docs)
-pkgver=42.2
+pkgver=42.3
 pkgrel=1
 pkgdesc="A window manager for GNOME"
 url="https://gitlab.gnome.org/GNOME/mutter"
@@ -21,7 +21,7 @@ depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
 makedepends=(gobject-introspection git egl-wayland meson xorg-server
              wayland-protocols sysprof gi-docgen)
 checkdepends=(xorg-server-xvfb wireplumber python-dbusmock)
-_commit=10cece870cf25c15daa8b20130d328257ec5f132  # tags/42.2^0
+_commit=1903356b45c6c884a0451580f32494ff1288656d  # tags/42.3^0
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
         'mutter-blur-rounded_42.patch'
         'max-rounded.patch'
@@ -49,13 +49,13 @@ prepare() {
   patch -p1 < "$srcdir/max-rounded.patch"   
   patch -p1 < "$srcdir/mr1441.patch"
   patch -p1 < "$srcdir/mr1877.patch"
-  patch -p1 < "$srcdir/mr2091.patch"
-  patch -p1 < "$srcdir/mutter-sched_fifo.patch"
+  # patch -p1 < "$srcdir/mr2091.patch"
+  # patch -p1 < "$srcdir/mutter-sched_fifo.patch"
 }
 
 build() {
-  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition -flto=auto -flto-partition=one -fdevirtualize-at-ltrans"
-  LDFLAGS+=" -Wl,-Bsymbolic-functions -flto=auto -flto-partition=one -fdevirtualize-at-ltrans"
+  CFLAGS="${CFLAGS/-O2/-O3} -fno-semantic-interposition"
+  LDFLAGS+=" -Wl,-Bsymbolic-functions"
 
   arch-meson mutter build \
     -D egl_device=true \

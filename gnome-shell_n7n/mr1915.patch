@@ -17,9 +17,10 @@ index c6e64766e..2b5fccd57 100644
 +// omitting the middle rectangle.
 +$invisible_occluded_bg_color: rgba(3,2,1,0);
 +
- // derived hover colors
- $hover_bg_color: if($variant=='light', darken($bg_color, 3%), lighten($bg_color, 4%));
- $hover_fg_color: if($variant=='light', darken($fg_color, 5%), lighten($fg_color, 4%));
+ // fonts
+ $base_font_size: 11;
+ $text_shadow_color: if($variant == 'light', rgba(255,255,255,0.3), rgba(0,0,0,0.2));
+
 diff --git a/data/theme/gnome-shell-sass/widgets/_window-picker.scss b/data/theme/gnome-shell-sass/widgets/_window-picker.scss
 index e494f6d8a..7c3a26cd4 100644
 --- a/data/theme/gnome-shell-sass/widgets/_window-picker.scss
