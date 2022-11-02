@@ -1,0 +1,1420 @@
+From c17d58a50e33bfc0add88a5417d89ddae159d467 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 24 Oct 2020 10:43:49 +0200
+Subject: [PATCH 01/13] clutter/actor: Remove get_default_paint_volume() API
+
+These days it's possible to chain up into the default get_paint_volume()
+implementation again, which renders
+clutter_actor_get_default_paint_volume() unnecessary. So remove that
+function and move clutter_actor_update_default_paint_volume() back into
+real_get_paint_volume() where it belongs.
+---
+ clutter/clutter/clutter-actor.c | 59 ++-------------------------------
+ clutter/clutter/clutter-actor.h |  2 --
+ 2 files changed, 2 insertions(+), 59 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 009488a069..e1a6826dbe 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -5660,8 +5660,8 @@ atk_implementor_iface_init (AtkImplementorIface *iface)
+ }
+ 
+ static gboolean
+-clutter_actor_update_default_paint_volume (ClutterActor       *self,
+-                                           ClutterPaintVolume *volume)
++clutter_actor_real_get_paint_volume (ClutterActor       *self,
++                                     ClutterPaintVolume *volume)
+ {
+   ClutterActorPrivate *priv = self->priv;
+   gboolean res = TRUE;
+@@ -5746,61 +5746,6 @@ clutter_actor_update_default_paint_volume (ClutterActor       *self,
+     }
+ 
+   return res;
+-
+-}
+-
+-static gboolean
+-clutter_actor_real_get_paint_volume (ClutterActor       *self,
+-                                     ClutterPaintVolume *volume)
+-{
+-  return clutter_actor_update_default_paint_volume (self, volume);
+-}
+-
+-/**
+- * clutter_actor_get_default_paint_volume:
+- * @self: a #ClutterActor
+- *
+- * Retrieves the default paint volume for @self.
+- *
+- * This function provides the same #ClutterPaintVolume that would be
+- * computed by the default implementation inside #ClutterActor of the
+- * #ClutterActorClass.get_paint_volume() virtual function.
+- *
+- * This function should only be used by #ClutterActor subclasses that
+- * cannot chain up to the parent implementation when computing their
+- * paint volume.
+- *
+- * Return value: (transfer none) (nullable): a pointer to the default
+- *   #ClutterPaintVolume, relative to the #ClutterActor, or %NULL if
+- *   the actor could not compute a valid paint volume. The returned value
+- *   is not guaranteed to be stable across multiple frames, so if you
+- *   want to retain it, you will need to copy it using
+- *   clutter_paint_volume_copy().
+- */
+-const ClutterPaintVolume *
+-clutter_actor_get_default_paint_volume (ClutterActor *self)
+-{
+-  ClutterPaintVolume volume;
+-  ClutterPaintVolume *res;
+-
+-  g_return_val_if_fail (CLUTTER_IS_ACTOR (self), NULL);
+-
+-  res = NULL;
+-  _clutter_paint_volume_init_static (&volume, self);
+-  if (clutter_actor_update_default_paint_volume (self, &volume))
+-    {
+-      ClutterActor *stage = _clutter_actor_get_stage_internal (self);
+-
+-      if (stage != NULL)
+-        {
+-          res = _clutter_stage_paint_volume_stack_allocate (CLUTTER_STAGE (stage));
+-          _clutter_paint_volume_copy_static (&volume, res);
+-        }
+-    }
+-
+-  clutter_paint_volume_free (&volume);
+-
+-  return res;
+ }
+ 
+ static gboolean
+diff --git a/clutter/clutter/clutter-actor.h b/clutter/clutter/clutter-actor.h
+index d107b4bda6..b7d9fc93d6 100644
+--- a/clutter/clutter/clutter-actor.h
++++ b/clutter/clutter/clutter-actor.h
+@@ -638,8 +638,6 @@ const ClutterPaintVolume *      clutter_actor_get_paint_volume
+ CLUTTER_EXPORT
+ const ClutterPaintVolume *      clutter_actor_get_transformed_paint_volume      (ClutterActor               *self,
+                                                                                  ClutterActor               *relative_to_ancestor);
+-CLUTTER_EXPORT
+-const ClutterPaintVolume *      clutter_actor_get_default_paint_volume          (ClutterActor               *self);
+ 
+ /* Events */
+ CLUTTER_EXPORT
+-- 
+GitLab
+
+
+From 2e81a31f9bd9a197d8f7218a23edd73c5305ee3c Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 17 Oct 2020 12:54:01 +0200
+Subject: [PATCH 02/13] clutter/paint-volume: Mark a paint volume argument as
+ const
+
+The function _clutter_paint_volume_get_stage_paint_box() actually
+doesn't modify the paint volume that's passed to it, so make that a bit
+more clear by passing a const paint volume as the argument.
+---
+ clutter/clutter/clutter-paint-volume-private.h | 6 +++---
+ clutter/clutter/clutter-paint-volume.c         | 6 +++---
+ 2 files changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/clutter/clutter/clutter-paint-volume-private.h b/clutter/clutter/clutter-paint-volume-private.h
+index a54218460b..accaa48356 100644
+--- a/clutter/clutter/clutter-paint-volume-private.h
++++ b/clutter/clutter/clutter-paint-volume-private.h
+@@ -126,9 +126,9 @@ void                _clutter_paint_volume_set_reference_actor  (ClutterPaintVolu
+ ClutterCullResult   _clutter_paint_volume_cull                 (ClutterPaintVolume       *pv,
+                                                                 const graphene_frustum_t *frustum);
+ 
+-void                _clutter_paint_volume_get_stage_paint_box  (ClutterPaintVolume *pv,
+-                                                                ClutterStage *stage,
+-                                                                ClutterActorBox *box);
++void                _clutter_paint_volume_get_stage_paint_box  (const ClutterPaintVolume *pv,
++                                                                ClutterStage             *stage,
++                                                                ClutterActorBox          *box);
+ 
+ void                _clutter_paint_volume_transform_relative   (ClutterPaintVolume *pv,
+                                                                 ClutterActor *relative_to_ancestor);
+diff --git a/clutter/clutter/clutter-paint-volume.c b/clutter/clutter/clutter-paint-volume.c
+index dbec4d130f..e2f273ef33 100644
+--- a/clutter/clutter/clutter-paint-volume.c
++++ b/clutter/clutter/clutter-paint-volume.c
+@@ -1029,9 +1029,9 @@ _clutter_paint_volume_cull (ClutterPaintVolume       *pv,
+ }
+ 
+ void
+-_clutter_paint_volume_get_stage_paint_box (ClutterPaintVolume *pv,
+-                                           ClutterStage *stage,
+-                                           ClutterActorBox *box)
++_clutter_paint_volume_get_stage_paint_box (const ClutterPaintVolume *pv,
++                                           ClutterStage             *stage,
++                                           ClutterActorBox          *box)
+ {
+   ClutterPaintVolume projected_pv;
+   graphene_matrix_t modelview;
+-- 
+GitLab
+
+
+From 3bcabbb81cb866fda935aef19ffe325148e5681d Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 21 Nov 2020 11:45:57 +0100
+Subject: [PATCH 03/13] clutter/actor: Clean up real_get_paint_volume() a bit
+
+We can get rid of an indentation level and the "ret" variable here and
+instead simply early-return when we need to.
+---
+ clutter/clutter/clutter-actor.c | 71 ++++++++++++++-------------------
+ 1 file changed, 29 insertions(+), 42 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index e1a6826dbe..5ef1c9989f 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -5664,7 +5664,7 @@ clutter_actor_real_get_paint_volume (ClutterActor       *self,
+                                      ClutterPaintVolume *volume)
+ {
+   ClutterActorPrivate *priv = self->priv;
+-  gboolean res = TRUE;
++  ClutterActor *child;
+ 
+   /* this should be checked before we call this function, but it's a
+    * good idea to be explicit when it costs us nothing
+@@ -5698,54 +5698,41 @@ clutter_actor_real_get_paint_volume (ClutterActor       *self,
+    * outside the clip region.
+    */
+   if (priv->clip_to_allocation)
+-    {
+-      /* the allocation has already been set, so we just flip the
+-       * return value
+-       */
+-      res = TRUE;
+-    }
+-  else
+-    {
+-      ClutterActor *child;
++    return TRUE;
+ 
+-      /* if we don't have children we just bail out here... */
+-      if (priv->n_children == 0)
+-        return res;
++  /* if we don't have children we just bail out here... */
++  if (priv->n_children == 0)
++    return TRUE;
+ 
+-      /* ...but if we have children then we ask for their paint volume in
+-       * our coordinates. if any of our children replies that it doesn't
+-       * have a paint volume, we bail out
+-       */
+-      for (child = priv->first_child;
+-           child != NULL;
+-           child = child->priv->next_sibling)
+-        {
+-          const ClutterPaintVolume *child_volume;
++  /* ...but if we have children then we ask for their paint volume in
++   * our coordinates. if any of our children replies that it doesn't
++   * have a paint volume, we bail out
++   */
++  for (child = priv->first_child;
++       child != NULL;
++       child = child->priv->next_sibling)
++    {
++      const ClutterPaintVolume *child_volume;
+ 
+-          /* we ignore unmapped children, since they won't be painted.
+-           *
+-           * XXX: we also have to ignore mapped children without a valid
+-           * allocation, because apparently some code above Clutter allows
+-           * them.
+-           */
+-          if ((!CLUTTER_ACTOR_IS_MAPPED (child) &&
+-               !clutter_actor_has_mapped_clones (child)) ||
+-              !clutter_actor_has_allocation (child))
+-            continue;
++      /* we ignore unmapped children, since they won't be painted.
++       *
++       * XXX: we also have to ignore mapped children without a valid
++       * allocation, because apparently some code above Clutter allows
++       * them.
++       */
++      if ((!CLUTTER_ACTOR_IS_MAPPED (child) &&
++           !clutter_actor_has_mapped_clones (child)) ||
++          !clutter_actor_has_allocation (child))
++        continue;
+ 
+-          child_volume = clutter_actor_get_transformed_paint_volume (child, self);
+-          if (child_volume == NULL)
+-            {
+-              res = FALSE;
+-              break;
+-            }
++      child_volume = clutter_actor_get_transformed_paint_volume (child, self);
++      if (child_volume == NULL)
++        return FALSE;
+ 
+-          clutter_paint_volume_union (volume, child_volume);
+-          res = TRUE;
+-        }
++      clutter_paint_volume_union (volume, child_volume);
+     }
+ 
+-  return res;
++  return TRUE;
+ }
+ 
+ static gboolean
+-- 
+GitLab
+
+
+From 0767982f9883cc66379d11211118c8074940e064 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 24 Oct 2020 13:44:53 +0200
+Subject: [PATCH 04/13] clutter/text: Replace cached paint volume with the one
+ cached by actor
+
+Since ClutterActor now properly caches its paint volume and ClutterText
+tries hard to invalidate its own cached paint volume on every redraw
+anyway (that's more often than ClutterActor invalidates its own paint
+volume), we can simply rely on the caching of the paint volume done by
+ClutterActor and invalidate that on every redraw.
+
+So remove the private cached paint volume from ClutterText and all its
+invalidation machinery.
+---
+ clutter/clutter/clutter-text.c | 133 +++++++++++----------------------
+ 1 file changed, 44 insertions(+), 89 deletions(-)
+
+diff --git a/clutter/clutter/clutter-text.c b/clutter/clutter/clutter-text.c
+index a294c4b737..244dacd5cc 100644
+--- a/clutter/clutter/clutter-text.c
++++ b/clutter/clutter/clutter-text.c
+@@ -455,43 +455,10 @@ G_DEFINE_TYPE_WITH_CODE (ClutterText,
+                          G_IMPLEMENT_INTERFACE (CLUTTER_TYPE_ANIMATABLE,
+                                                 clutter_animatable_iface_init));
+ 
+-static inline void
+-clutter_text_free_paint_volume (ClutterText *text)
+-{
+-  ClutterTextPrivate *priv = text->priv;
+-
+-  if (priv->paint_volume_valid)
+-    {
+-      clutter_paint_volume_free (&priv->paint_volume);
+-      priv->paint_volume_valid = FALSE;
+-    }
+-}
+-
+-static inline void
+-clutter_text_dirty_paint_volume (ClutterText *text)
+-{
+-  ClutterTextPrivate *priv = text->priv;
+-
+-  if (priv->paint_volume_valid)
+-    {
+-      clutter_text_free_paint_volume (text);
+-      clutter_actor_invalidate_paint_volume (CLUTTER_ACTOR (text));
+-    }
+-}
+-
+ static inline void
+ clutter_text_queue_redraw (ClutterActor *self)
+ {
+-  /* This is a wrapper for clutter_actor_queue_redraw that also
+-     dirties the cached paint volume. It would be nice if we could
+-     just override the default implementation of the queue redraw
+-     signal to do this instead but that doesn't work because the
+-     signal isn't immediately emitted when queue_redraw is called.
+-     Clutter will however immediately call get_paint_volume when
+-     queue_redraw is called so we do need to dirty it immediately. */
+-
+-  clutter_text_dirty_paint_volume (CLUTTER_TEXT (self));
+-
++  clutter_actor_invalidate_paint_volume (self);
+   clutter_actor_queue_redraw (self);
+ }
+ 
+@@ -505,9 +472,6 @@ clutter_text_should_draw_cursor (ClutterText *self)
+     priv->has_focus;
+ }
+ 
+-#define clutter_actor_queue_redraw \
+-  Please_use_clutter_text_queue_redraw_instead
+-
+ #define offset_real(t,p)        ((p) == -1 ? g_utf8_strlen ((t), -1) : (p))
+ 
+ static gint
+@@ -854,7 +818,7 @@ clutter_text_dirty_cache (ClutterText *text)
+ 	priv->cached_layouts[i].layout = NULL;
+       }
+ 
+-  clutter_text_dirty_paint_volume (text);
++  clutter_actor_invalidate_paint_volume (CLUTTER_ACTOR (text));
+ }
+ 
+ /*
+@@ -1824,8 +1788,6 @@ clutter_text_finalize (GObject *gobject)
+   if (priv->preedit_attrs)
+     pango_attr_list_unref (priv->preedit_attrs);
+ 
+-  clutter_text_free_paint_volume (self);
+-
+   clutter_text_set_buffer (self, NULL);
+   g_free (priv->font_name);
+ 
+@@ -2447,7 +2409,7 @@ clutter_text_remove_password_hint (gpointer data)
+   self->priv->password_hint_id = 0;
+ 
+   clutter_text_dirty_cache (data);
+-  clutter_text_queue_redraw (data);
++  clutter_actor_queue_redraw (data); // paint volume was already invalidated by clutter_text_dirty_cache()
+ 
+   return G_SOURCE_REMOVE;
+ }
+@@ -2901,72 +2863,64 @@ clutter_text_get_paint_volume (ClutterActor       *self,
+ {
+   ClutterText *text = CLUTTER_TEXT (self);
+   ClutterTextPrivate *priv = text->priv;
++  PangoLayout *layout;
++  PangoRectangle ink_rect;
++  graphene_point3d_t origin;
++  float resource_scale;
+ 
+   /* ClutterText uses the logical layout as the natural size of the
+      actor. This means that it can sometimes paint outside of its
+      allocation for example with italic fonts with serifs. Therefore
+      we should use the ink rectangle of the layout instead */
+ 
+-  if (!priv->paint_volume_valid)
+-    {
+-      PangoLayout *layout;
+-      PangoRectangle ink_rect;
+-      graphene_point3d_t origin;
+-      float resource_scale;
+-
+-      /* If the text is single line editable then it gets clipped to
+-         the allocation anyway so we can just use that */
+-      if (priv->editable && priv->single_line_mode)
+-        return _clutter_actor_set_default_paint_volume (self,
+-                                                        CLUTTER_TYPE_TEXT,
+-                                                        volume);
++  /* If the text is single line editable then it gets clipped to
++     the allocation anyway so we can just use that */
++  if (priv->editable && priv->single_line_mode)
++    return _clutter_actor_set_default_paint_volume (self,
++                                                    CLUTTER_TYPE_TEXT,
++                                                    volume);
+ 
+-      if (G_OBJECT_TYPE (self) != CLUTTER_TYPE_TEXT)
+-        return FALSE;
++  if (G_OBJECT_TYPE (self) != CLUTTER_TYPE_TEXT)
++    return FALSE;
+ 
+-      if (!clutter_actor_has_allocation (self))
+-        return FALSE;
++  if (!clutter_actor_has_allocation (self))
++    return FALSE;
+ 
+-      resource_scale = clutter_actor_get_resource_scale (self);
++  resource_scale = clutter_actor_get_resource_scale (self);
+ 
+-      _clutter_paint_volume_init_static (&priv->paint_volume, self);
++  _clutter_paint_volume_init_static (volume, self);
+ 
+-      layout = clutter_text_get_layout (text);
+-      pango_layout_get_extents (layout, &ink_rect, NULL);
++  layout = clutter_text_get_layout (text);
++  pango_layout_get_extents (layout, &ink_rect, NULL);
+ 
+-      origin.x = pango_to_logical_pixels (ink_rect.x, resource_scale);
+-      origin.y = pango_to_logical_pixels (ink_rect.y, resource_scale);
+-      origin.z = 0;
+-      clutter_paint_volume_set_origin (&priv->paint_volume, &origin);
+-      clutter_paint_volume_set_width (&priv->paint_volume,
+-                                      pango_to_logical_pixels (ink_rect.width,
+-                                                               resource_scale));
+-      clutter_paint_volume_set_height (&priv->paint_volume,
+-                                       pango_to_logical_pixels (ink_rect.height,
+-                                                                resource_scale));
+-
+-      /* If the cursor is visible then that will likely be drawn
+-         outside of the ink rectangle so we should merge that in */
+-      if (clutter_text_should_draw_cursor (text))
+-        {
+-          ClutterPaintVolume cursor_paint_volume;
++  origin.x = pango_to_logical_pixels (ink_rect.x, resource_scale);
++  origin.y = pango_to_logical_pixels (ink_rect.y, resource_scale);
++  origin.z = 0;
++  clutter_paint_volume_set_origin (volume, &origin);
++  clutter_paint_volume_set_width (volume,
++                                  pango_to_logical_pixels (ink_rect.width,
++                                                           resource_scale));
++  clutter_paint_volume_set_height (volume,
++                                   pango_to_logical_pixels (ink_rect.height,
++                                                            resource_scale));
+ 
+-          _clutter_paint_volume_init_static (&cursor_paint_volume, self);
++  /* If the cursor is visible then that will likely be drawn
++     outside of the ink rectangle so we should merge that in */
++  if (clutter_text_should_draw_cursor (text))
++    {
++      ClutterPaintVolume cursor_paint_volume;
+ 
+-          clutter_text_get_paint_volume_for_cursor (text, resource_scale,
+-                                                    &cursor_paint_volume);
++      _clutter_paint_volume_init_static (&cursor_paint_volume, self);
+ 
+-          clutter_paint_volume_union (&priv->paint_volume,
+-                                      &cursor_paint_volume);
++      clutter_text_get_paint_volume_for_cursor (text, resource_scale,
++                                                &cursor_paint_volume);
+ 
+-          clutter_paint_volume_free (&cursor_paint_volume);
+-        }
++      clutter_paint_volume_union (volume,
++                                  &cursor_paint_volume);
+ 
+-      priv->paint_volume_valid = TRUE;
++      clutter_paint_volume_free (&cursor_paint_volume);
+     }
+ 
+-  _clutter_paint_volume_copy_static (&priv->paint_volume, volume);
+-
+   return TRUE;
+ }
+ 
+@@ -3717,6 +3671,7 @@ clutter_text_set_color_internal (ClutterText        *self,
+     }
+ 
+   clutter_text_queue_redraw (CLUTTER_ACTOR (self));
++
+   g_object_notify_by_pspec (G_OBJECT (self), pspec);
+   if (other)
+     g_object_notify_by_pspec (G_OBJECT (self), other);
+@@ -4810,7 +4765,7 @@ clutter_text_queue_redraw_or_relayout (ClutterText *self)
+       preferred_height > 0 &&
+       fabsf (preferred_width - clutter_actor_get_width (actor)) <= 0.001 &&
+       fabsf (preferred_height - clutter_actor_get_height (actor)) <= 0.001)
+-    clutter_text_queue_redraw (actor);
++    clutter_actor_queue_redraw (CLUTTER_ACTOR (self)); // paint volume was already invalidated by clutter_text_dirty_cache()
+   else
+     clutter_actor_queue_relayout (actor);
+ }
+-- 
+GitLab
+
+
+From 31e4f179be99f146b5430d51c27932b3d417084a Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 17 Oct 2020 13:12:50 +0200
+Subject: [PATCH 05/13] clutter/actor: Refactor updating of the paint volume
+
+For clarity and for further improvements, introduce a separate function
+to update the paint volume instead of doing that inside
+_clutter_actor_get_paint_volume_mutable().
+
+Also add a FIXME comment for a possible bug I noticed while working on
+it.
+---
+ clutter/clutter/clutter-actor.c | 85 ++++++++++++++++++++-------------
+ 1 file changed, 51 insertions(+), 34 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 5ef1c9989f..641c186f8a 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -15148,6 +15148,53 @@ _clutter_actor_has_active_paint_volume_override_effects (ClutterActor *self)
+   return FALSE;
+ }
+ 
++static void
++ensure_paint_volume (ClutterActor *self)
++{
++  ClutterActorPrivate *priv = self->priv;
++  gboolean has_paint_volume_override_effects;
++  gboolean must_update_paint_volume;
++
++  has_paint_volume_override_effects = _clutter_actor_has_active_paint_volume_override_effects (self);
++
++  /* If effects are applied, the actor paint volume
++   * needs to be recomputed on each paint, since those
++   * paint volumes could change over the duration of the
++   * effect.
++   *
++   * We also need to update the paint volume if we went
++   * from having effects to not having effects on the last
++   * paint volume update.
++   *
++   * FIXME: This opens the door for some tricky issues: If our paint volume
++   * is invalid, it's implied that all parent paint volumes are invalid. If
++   * we don't want to break that invariant, we should find a better solution
++   * to deal with effects.
++   */
++  must_update_paint_volume =
++    priv->current_effect != NULL ||
++    has_paint_volume_override_effects ||
++    priv->had_effects_on_last_paint_volume_update;
++
++  priv->needs_paint_volume_update |= must_update_paint_volume;
++
++  if (priv->needs_paint_volume_update)
++    {
++      priv->had_effects_on_last_paint_volume_update = has_paint_volume_override_effects;
++
++      if (priv->paint_volume_valid)
++        clutter_paint_volume_free (&priv->paint_volume);
++
++      priv->paint_volume_valid = FALSE;
++
++      if (_clutter_actor_get_paint_volume_real (self, &priv->paint_volume))
++        {
++          priv->paint_volume_valid = TRUE;
++          priv->needs_paint_volume_update = FALSE;
++        }
++    }
++}
++
+ /* The public clutter_actor_get_paint_volume API returns a const
+  * pointer since we return a pointer directly to the cached
+  * PaintVolume associated with the actor and don't want the user to
+@@ -15158,44 +15205,14 @@ _clutter_actor_has_active_paint_volume_override_effects (ClutterActor *self)
+ static ClutterPaintVolume *
+ _clutter_actor_get_paint_volume_mutable (ClutterActor *self)
+ {
+-  gboolean has_paint_volume_override_effects;
+-  ClutterActorPrivate *priv;
+-
+-  priv = self->priv;
++  ClutterActorPrivate *priv = self->priv;
+ 
+-  has_paint_volume_override_effects = _clutter_actor_has_active_paint_volume_override_effects (self);
++  ensure_paint_volume (self);
+ 
+   if (priv->paint_volume_valid)
+-    {
+-      /* If effects are applied, the actor paint volume
+-       * needs to be recomputed on each paint, since those
+-       * paint volumes could change over the duration of the
+-       * effect.
+-       *
+-       * We also need to update the paint volume if we went
+-       * from having effects to not having effects on the last
+-       * paint volume update. */
+-      if (!priv->needs_paint_volume_update &&
+-          priv->current_effect == NULL &&
+-          !has_paint_volume_override_effects &&
+-          !priv->had_effects_on_last_paint_volume_update)
+-        return &priv->paint_volume;
+-      clutter_paint_volume_free (&priv->paint_volume);
+-    }
+-
+-  priv->had_effects_on_last_paint_volume_update = has_paint_volume_override_effects;
++    return &priv->paint_volume;
+ 
+-  if (_clutter_actor_get_paint_volume_real (self, &priv->paint_volume))
+-    {
+-      priv->paint_volume_valid = TRUE;
+-      priv->needs_paint_volume_update = FALSE;
+-      return &priv->paint_volume;
+-    }
+-  else
+-    {
+-      priv->paint_volume_valid = FALSE;
+-      return NULL;
+-    }
++  return NULL;
+ }
+ 
+ /**
+-- 
+GitLab
+
+
+From e4f9f8606da678b3dcf6c3819c53b3935ff6a22b Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sat, 21 Nov 2020 13:22:32 +0100
+Subject: [PATCH 06/13] clutter/actor: Rename paint_volume_valid to
+ has_paint_volume for clarity
+
+Rename the paint_volume_valid flag to has_paint_volume in order to
+better reflect what it's for.
+
+The name "paint_volume_valid" implies that the paint volume can be
+invalidated and thus sounds like it's involved with some kind of
+caching. The flag that's actually involved with caching is
+"needs_paint_volume_update", while "paint_volume_valid" is only meant to
+store whether the actor has a paint volume to work with.
+
+So rename paint_volume_valid to has_paint_volume to avoid confusion
+about which flag is used for caching.
+---
+ clutter/clutter/clutter-actor.c | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 641c186f8a..0611aae1a1 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -825,7 +825,7 @@ struct _ClutterActorPrivate
+   guint enable_paint_unmapped       : 1;
+   guint has_key_focus               : 1;
+   guint propagated_one_redraw       : 1;
+-  guint paint_volume_valid          : 1;
++  guint has_paint_volume            : 1;
+   guint last_paint_volume_valid     : 1;
+   guint in_clone_paint              : 1;
+   guint transform_valid             : 1;
+@@ -3965,7 +3965,7 @@ clutter_actor_pick (ClutterActor       *actor,
+   /* mark that we are in the paint process */
+   CLUTTER_SET_PRIVATE_FLAGS (actor, CLUTTER_IN_PICK);
+ 
+-  if (should_cull && priv->paint_volume_valid && priv->last_paint_volume_valid)
++  if (should_cull && priv->has_paint_volume && priv->last_paint_volume_valid)
+     {
+       graphene_box_t box;
+ 
+@@ -15182,14 +15182,14 @@ ensure_paint_volume (ClutterActor *self)
+     {
+       priv->had_effects_on_last_paint_volume_update = has_paint_volume_override_effects;
+ 
+-      if (priv->paint_volume_valid)
++      if (priv->has_paint_volume)
+         clutter_paint_volume_free (&priv->paint_volume);
+ 
+-      priv->paint_volume_valid = FALSE;
++      priv->has_paint_volume = FALSE;
+ 
+       if (_clutter_actor_get_paint_volume_real (self, &priv->paint_volume))
+         {
+-          priv->paint_volume_valid = TRUE;
++          priv->has_paint_volume = TRUE;
+           priv->needs_paint_volume_update = FALSE;
+         }
+     }
+@@ -15209,7 +15209,7 @@ _clutter_actor_get_paint_volume_mutable (ClutterActor *self)
+ 
+   ensure_paint_volume (self);
+ 
+-  if (priv->paint_volume_valid)
++  if (priv->has_paint_volume)
+     return &priv->paint_volume;
+ 
+   return NULL;
+-- 
+GitLab
+
+
+From da6381e31e4bbefa72dda0f99e42b4a83ed5f054 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 17 Oct 2022 17:00:46 +0200
+Subject: [PATCH 07/13] clutter/actor: Clarify things about the last painted
+ paint volume a bit
+
+Rename the `last_paint_volume` to `visible_paint_volume`: That avoids
+confusion with the `had_effects_on_last_paint_volume_update` flag and
+also makes it clear that this paint volume is the currently visible one.
+---
+ clutter/clutter/clutter-actor.c | 84 +++++++++++++--------------------
+ 1 file changed, 34 insertions(+), 50 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 0611aae1a1..0a53d93284 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -770,10 +770,10 @@ struct _ClutterActorPrivate
+ 
+   ClutterPaintVolume paint_volume;
+ 
+-  /* NB: This volume isn't relative to this actor, it is in eye
+-   * coordinates so that it can remain valid after the actor changes.
++  /* The paint volume of the actor when it was last drawn to the screen,
++   * stored in absolute coordinates.
+    */
+-  ClutterPaintVolume last_paint_volume;
++  ClutterPaintVolume visible_paint_volume;
+ 
+   ClutterColor bg_color;
+ 
+@@ -826,7 +826,7 @@ struct _ClutterActorPrivate
+   guint has_key_focus               : 1;
+   guint propagated_one_redraw       : 1;
+   guint has_paint_volume            : 1;
+-  guint last_paint_volume_valid     : 1;
++  guint visible_paint_volume_valid  : 1;
+   guint in_clone_paint              : 1;
+   guint transform_valid             : 1;
+   /* This is TRUE if anything has queued a redraw since we were last
+@@ -1651,11 +1651,11 @@ clutter_actor_real_unmap (ClutterActor *self)
+ 
+   if (priv->unmapped_paint_branch_counter == 0)
+     {
+-      /* clear the contents of the last paint volume, so that hiding + moving +
++      /* clear the contents of the visible paint volume, so that hiding + moving +
+        * showing will not result in the wrong area being repainted
+        */
+-     _clutter_paint_volume_init_static (&priv->last_paint_volume, NULL);
+-      priv->last_paint_volume_valid = TRUE;
++      _clutter_paint_volume_init_static (&priv->visible_paint_volume, NULL);
++      priv->visible_paint_volume_valid = TRUE;
+ 
+       if (priv->parent && !CLUTTER_ACTOR_IN_DESTRUCTION (priv->parent))
+         {
+@@ -3333,10 +3333,10 @@ cull_actor (ClutterActor        *self,
+   ClutterCullResult result = CLUTTER_CULL_RESULT_IN;
+   int i;
+ 
+-  if (!priv->last_paint_volume_valid)
++  if (!priv->visible_paint_volume_valid)
+     {
+       CLUTTER_NOTE (CLIPPING, "Bail from cull_actor without culling (%s): "
+-                    "->last_paint_volume_valid == FALSE",
++                    "->visible_paint_volume_valid == FALSE",
+                     _clutter_actor_get_debug_name (self));
+       return FALSE;
+     }
+@@ -3364,7 +3364,7 @@ cull_actor (ClutterActor        *self,
+       const graphene_frustum_t *clip_frustum =
+         &g_array_index (clip_frusta, graphene_frustum_t, i);
+ 
+-      result = _clutter_paint_volume_cull (&priv->last_paint_volume,
++      result = _clutter_paint_volume_cull (&priv->visible_paint_volume,
+                                            clip_frustum);
+ 
+       if (result != CLUTTER_CULL_RESULT_OUT)
+@@ -3376,35 +3376,6 @@ cull_actor (ClutterActor        *self,
+   return TRUE;
+ }
+ 
+-static void
+-_clutter_actor_update_last_paint_volume (ClutterActor *self)
+-{
+-  ClutterActorPrivate *priv = self->priv;
+-  const ClutterPaintVolume *pv;
+-
+-  if (priv->last_paint_volume_valid)
+-    {
+-      clutter_paint_volume_free (&priv->last_paint_volume);
+-      priv->last_paint_volume_valid = FALSE;
+-    }
+-
+-  pv = clutter_actor_get_paint_volume (self);
+-  if (!pv)
+-    {
+-      CLUTTER_NOTE (CLIPPING, "Bail from update_last_paint_volume (%s): "
+-                    "Actor failed to report a paint volume",
+-                    _clutter_actor_get_debug_name (self));
+-      return;
+-    }
+-
+-  _clutter_paint_volume_copy_static (pv, &priv->last_paint_volume);
+-
+-  _clutter_paint_volume_transform_relative (&priv->last_paint_volume,
+-                                            NULL); /* eye coordinates */
+-
+-  priv->last_paint_volume_valid = TRUE;
+-}
+-
+ /* This is the same as clutter_actor_add_effect except that it doesn't
+    queue a redraw and it doesn't notify on the effect property */
+ static void
+@@ -3965,11 +3936,11 @@ clutter_actor_pick (ClutterActor       *actor,
+   /* mark that we are in the paint process */
+   CLUTTER_SET_PRIVATE_FLAGS (actor, CLUTTER_IN_PICK);
+ 
+-  if (should_cull && priv->has_paint_volume && priv->last_paint_volume_valid)
++  if (should_cull && priv->has_paint_volume && priv->visible_paint_volume_valid)
+     {
+       graphene_box_t box;
+ 
+-      clutter_paint_volume_to_box (&priv->last_paint_volume, &box);
++      clutter_paint_volume_to_box (&priv->visible_paint_volume, &box);
+       if (!clutter_pick_context_intersects_box (pick_context, &box))
+         {
+           clutter_pick_context_log_overlap (pick_context, actor);
+@@ -7651,9 +7622,9 @@ clutter_actor_init (ClutterActor *self)
+   priv->opacity_override = -1;
+   priv->enable_model_view_transform = TRUE;
+ 
+-  /* Initialize an empty paint volume to start with */
+-  _clutter_paint_volume_init_static (&priv->last_paint_volume, NULL);
+-  priv->last_paint_volume_valid = TRUE;
++  /* We're not visible yet,  so the visible_paint_volume is empty */
++  _clutter_paint_volume_init_static (&priv->visible_paint_volume, NULL);
++  priv->visible_paint_volume_valid = TRUE;
+ 
+   priv->transform_valid = FALSE;
+ 
+@@ -15588,7 +15559,17 @@ clutter_actor_finish_layout (ClutterActor *self,
+       CLUTTER_ACTOR_IN_DESTRUCTION (self))
+     return;
+ 
+-  _clutter_actor_update_last_paint_volume (self);
++  ensure_paint_volume (self);
++
++  if (priv->has_paint_volume)
++    {
++      _clutter_paint_volume_copy_static (&priv->paint_volume,
++                                         &priv->visible_paint_volume);
++      _clutter_paint_volume_transform_relative (&priv->visible_paint_volume,
++                                                NULL); /* eye coordinates */
++    }
++
++  priv->visible_paint_volume_valid = priv->has_paint_volume;
+ 
+   if (priv->needs_update_stage_views)
+     {
+@@ -19220,14 +19201,17 @@ clutter_actor_get_redraw_clip (ClutterActor       *self,
+                                ClutterPaintVolume *dst_new_pv)
+ {
+   ClutterActorPrivate *priv = self->priv;
+-  ClutterPaintVolume *paint_volume;
+ 
+-  paint_volume = _clutter_actor_get_paint_volume_mutable (self);
+-  if (!paint_volume || !priv->last_paint_volume_valid)
++  ensure_paint_volume (self);
++
++  /* For a clipped redraw to work we need both the old paint volume and the new
++   * one, if any is missing we'll need to do an unclipped redraw.
++   */
++  if (!priv->visible_paint_volume_valid || !priv->has_paint_volume)
+     return FALSE;
+ 
+-  _clutter_paint_volume_set_from_volume (dst_old_pv, &priv->last_paint_volume);
+-  _clutter_paint_volume_set_from_volume (dst_new_pv, paint_volume);
++  _clutter_paint_volume_set_from_volume (dst_old_pv, &priv->visible_paint_volume);
++  _clutter_paint_volume_set_from_volume (dst_new_pv, &priv->paint_volume);
+ 
+   return TRUE;
+ }
+-- 
+GitLab
+
+
+From bddf66141879a9d85d7c5ad82a13c3682e48de7e Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sun, 30 Oct 2022 10:30:42 +0100
+Subject: [PATCH 08/13] clutter/actor: Remove outdated comment
+
+Updating of the paint volume used for culling these days happens
+during the finish-layout stage, not while painting. Also we have
+geometry-based, not paint-based picking anymore.
+---
+ clutter/clutter/clutter-actor.c | 27 ---------------------------
+ 1 file changed, 27 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 0a53d93284..1dde8d9486 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -3738,33 +3738,6 @@ clutter_actor_paint (ClutterActor        *self,
+    */
+   add_or_remove_flatten_effect (self);
+ 
+-  /* We save the current paint volume so that the next time the
+-   * actor queues a redraw we can constrain the redraw to just
+-   * cover the union of the new bounding box and the old.
+-   *
+-   * We also fetch the current paint volume to perform culling so
+-   * we can avoid painting actors outside the current clip region.
+-   *
+-   * If we are painting inside a clone, we should neither update
+-   * the paint volume or use it to cull painting, since the paint
+-   * box represents the location of the source actor on the
+-   * screen.
+-   *
+-   * XXX: We are starting to do a lot of vertex transforms on
+-   * the CPU in a typical paint, so at some point we should
+-   * audit these and consider caching some things.
+-   *
+-   * NB: We don't perform culling while picking at this point because
+-   * clutter-stage.c doesn't setup the clipping planes appropriately.
+-   *
+-   * NB: We don't want to update the last-paint-volume during picking
+-   * because the last-paint-volume is used to determine the old screen
+-   * space location of an actor that has moved so we can know the
+-   * minimal region to redraw to clear an old view of the actor. If we
+-   * update this during picking then by the time we come around to
+-   * paint then the last-paint-volume would likely represent the new
+-   * actor position not the old.
+-   */
+   culling_inhibited = priv->inhibit_culling_counter > 0;
+   if (!culling_inhibited && !in_clone_paint ())
+     {
+-- 
+GitLab
+
+
+From 805db2169027867d4d408e68eb66234da09787a6 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 17 Oct 2022 17:11:07 +0200
+Subject: [PATCH 09/13] clutter/actor: Cache the visible paint volume
+
+If no actors have changed their positions and we're only repainting
+because eg. a window needs a repaint, the paint volumes of all actors
+remain unchanged. There is no reason to redo those on every stage
+update in case.
+
+So introduce caching and invalidation logic for the visible_paint_volume
+that allows us to avoid a ton of matrix multiplications that right now
+are happening for the whole mapped actor tree on every redraw.
+
+Note that this removes two places where the visible paint volume is set
+to an empty paint volume: This is a compromise so that we can keep
+around the cached pv when hiding and showing an actor, it does slightly
+regress somewhere else though: When hiding -> moving -> showing an
+actor, we'll now include the old pv of the actor in the redraw clip when
+showing (even though that's not necessary), resulting in a bit of
+overpaint. For the sake of simplicity let's not care about that, it
+seems like a very.
+---
+ clutter/clutter/clutter-actor.c | 36 ++++++++++++++++-----------------
+ 1 file changed, 17 insertions(+), 19 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 1dde8d9486..f6326a33e5 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -842,6 +842,7 @@ struct _ClutterActorPrivate
+   guint needs_x_expand              : 1;
+   guint needs_y_expand              : 1;
+   guint needs_paint_volume_update   : 1;
++  guint needs_visible_paint_volume_update : 1;
+   guint had_effects_on_last_paint_volume_update : 1;
+   guint needs_update_stage_views    : 1;
+   guint clear_stage_views_needs_stage_views_changed : 1;
+@@ -1509,6 +1510,7 @@ queue_update_paint_volume (ClutterActor *actor)
+   while (actor)
+     {
+       actor->priv->needs_paint_volume_update = TRUE;
++      actor->priv->needs_visible_paint_volume_update = TRUE;
+       actor = actor->priv->parent;
+     }
+ }
+@@ -1651,12 +1653,6 @@ clutter_actor_real_unmap (ClutterActor *self)
+ 
+   if (priv->unmapped_paint_branch_counter == 0)
+     {
+-      /* clear the contents of the visible paint volume, so that hiding + moving +
+-       * showing will not result in the wrong area being repainted
+-       */
+-      _clutter_paint_volume_init_static (&priv->visible_paint_volume, NULL);
+-      priv->visible_paint_volume_valid = TRUE;
+-
+       if (priv->parent && !CLUTTER_ACTOR_IN_DESTRUCTION (priv->parent))
+         {
+           if (G_UNLIKELY (priv->parent->flags & CLUTTER_ACTOR_NO_LAYOUT))
+@@ -2480,6 +2476,7 @@ static void
+ absolute_geometry_changed (ClutterActor *actor)
+ {
+   actor->priv->needs_update_stage_views = TRUE;
++  actor->priv->needs_visible_paint_volume_update = TRUE;
+ }
+ 
+ static ClutterActorTraverseVisitFlags
+@@ -7587,6 +7584,7 @@ clutter_actor_init (ClutterActor *self)
+   priv->needs_height_request = TRUE;
+   priv->needs_allocation = TRUE;
+   priv->needs_paint_volume_update = TRUE;
++  priv->needs_visible_paint_volume_update = TRUE;
+   priv->needs_update_stage_views = TRUE;
+ 
+   priv->cached_width_age = 1;
+@@ -7595,10 +7593,6 @@ clutter_actor_init (ClutterActor *self)
+   priv->opacity_override = -1;
+   priv->enable_model_view_transform = TRUE;
+ 
+-  /* We're not visible yet,  so the visible_paint_volume is empty */
+-  _clutter_paint_volume_init_static (&priv->visible_paint_volume, NULL);
+-  priv->visible_paint_volume_valid = TRUE;
+-
+   priv->transform_valid = FALSE;
+ 
+   /* the default is to stretch the content, to match the
+@@ -15532,17 +15526,21 @@ clutter_actor_finish_layout (ClutterActor *self,
+       CLUTTER_ACTOR_IN_DESTRUCTION (self))
+     return;
+ 
+-  ensure_paint_volume (self);
+-
+-  if (priv->has_paint_volume)
++  if (priv->needs_visible_paint_volume_update)
+     {
+-      _clutter_paint_volume_copy_static (&priv->paint_volume,
+-                                         &priv->visible_paint_volume);
+-      _clutter_paint_volume_transform_relative (&priv->visible_paint_volume,
+-                                                NULL); /* eye coordinates */
+-    }
++      ensure_paint_volume (self);
++
++      if (priv->has_paint_volume)
++        {
++          _clutter_paint_volume_copy_static (&priv->paint_volume,
++                                             &priv->visible_paint_volume);
++          _clutter_paint_volume_transform_relative (&priv->visible_paint_volume,
++                                                    NULL); /* eye coordinates */
++        }
+ 
+-  priv->visible_paint_volume_valid = priv->has_paint_volume;
++      priv->visible_paint_volume_valid = priv->has_paint_volume;
++      priv->needs_visible_paint_volume_update = FALSE;
++    }
+ 
+   if (priv->needs_update_stage_views)
+     {
+-- 
+GitLab
+
+
+From 4d07a139cb4202e69a6773c7ab6491d3a22de531 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 17 Oct 2022 17:18:27 +0200
+Subject: [PATCH 10/13] clutter/actor: Update visible paint volume while
+ getting redraw clip
+
+With the last commit we introduced caching and invalidation logic for
+the visible paint volume, that already improved things a lot, but we can
+do even better:
+
+For getting a redraw clip, we need both the extents of the actor that
+are currently on the screen, as well as the extents of the actor that
+will be on screen with the next redraw. That's because in case the actor
+gets moved with the redraw, the old texture is also painted over. For
+this, so far we just passed visible_paint_volume as the old paint
+volume, and the new paint volume we fetched from scratch, forcing the
+stage to tranform it to eye coordinates.
+
+There's a smart trick to avoid those extra transforms: Getting the
+redraw clip happens before the finish-layout
+(clutter_actor_finish_layout()) step in stage updates. This means in
+clutter_actor_get_redraw_clip() we'll see
+priv->needs_visible_paint_volume_update is TRUE, and can then update the
+visible paint volume early. This avoids the extra update in
+clutter_actor_finish_layout() afterwards, and we're a little faster
+again.
+---
+ clutter/clutter/clutter-actor.c | 28 ++++++++++++++++++++++++++--
+ 1 file changed, 26 insertions(+), 2 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index f6326a33e5..2add4bd08f 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -15528,6 +15528,18 @@ clutter_actor_finish_layout (ClutterActor *self,
+ 
+   if (priv->needs_visible_paint_volume_update)
+     {
++      /* The way visible_paint_volume works is a bit tricky, so here's a small overview:
++       *
++       *  - The visible_paint_volume is meant to be a reflection of what's currently
++       *    visible on the screen, it's used for creating the redraw clip and
++       *    culling.
++       *  - visible_paint_volume gets updated during redraw cycles and only then,
++       *    so that it always reflects the state that was last painted to the screen.
++       *  - If the stage decides to do a clipped redraw of the actor,
++       *    visible_paint_volume gets updated early in
++       *    clutter_actor_get_redraw_clip() and we don't need to update it in
++       *    clutter_actor_finish_layout().
++       */
+       ensure_paint_volume (self);
+ 
+       if (priv->has_paint_volume)
+@@ -19181,8 +19193,20 @@ clutter_actor_get_redraw_clip (ClutterActor       *self,
+   if (!priv->visible_paint_volume_valid || !priv->has_paint_volume)
+     return FALSE;
+ 
+-  _clutter_paint_volume_set_from_volume (dst_old_pv, &priv->visible_paint_volume);
+-  _clutter_paint_volume_set_from_volume (dst_new_pv, &priv->paint_volume);
++  if (priv->needs_visible_paint_volume_update)
++    {
++      _clutter_paint_volume_set_from_volume (dst_old_pv, &priv->visible_paint_volume);
++
++      _clutter_paint_volume_copy_static (&priv->paint_volume,
++                                         &priv->visible_paint_volume);
++      _clutter_paint_volume_transform_relative (&priv->visible_paint_volume,
++                                                NULL); /* eye coordinates */
++
++      priv->visible_paint_volume_valid = TRUE;
++      priv->needs_visible_paint_volume_update = FALSE;
++    }
++
++  _clutter_paint_volume_set_from_volume (dst_new_pv, &priv->visible_paint_volume);
+ 
+   return TRUE;
+ }
+-- 
+GitLab
+
+
+From c94b2fec7a9620b288d75fede284f77819f0ef25 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 17 Oct 2022 18:22:30 +0200
+Subject: [PATCH 11/13] clutter/actor: Avoid always traversing actor tree on
+ finish_layout
+
+With commit 5a565b42586abb0c851888b827ffabc0cce38b75, we changed
+clutter_actor_finish_layout() to be not only about updating stage views,
+but also take care of updating the visible_paint_volume, for that we
+started doing a full tree traversal of all mapped actors.
+
+This can be quite a performance issue, apparently especially on certain
+ARM devices, where the simple tree traversal can take as long as 2ms.
+This is precious time we need to paint our next frame, so lets do a bit
+more work to avoid those useless traversals.
+
+Fixes https://gitlab.gnome.org/GNOME/mutter/-/issues/2459
+---
+ clutter/clutter/clutter-actor.c | 27 +++++++++++++++++++++++++++
+ 1 file changed, 27 insertions(+)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 2add4bd08f..19c58ba361 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -846,6 +846,7 @@ struct _ClutterActorPrivate
+   guint had_effects_on_last_paint_volume_update : 1;
+   guint needs_update_stage_views    : 1;
+   guint clear_stage_views_needs_stage_views_changed : 1;
++  guint needs_finish_layout : 1;
+ };
+ 
+ enum
+@@ -1511,6 +1512,7 @@ queue_update_paint_volume (ClutterActor *actor)
+     {
+       actor->priv->needs_paint_volume_update = TRUE;
+       actor->priv->needs_visible_paint_volume_update = TRUE;
++      actor->priv->needs_finish_layout = TRUE;
+       actor = actor->priv->parent;
+     }
+ }
+@@ -1530,6 +1532,19 @@ clutter_actor_real_map (ClutterActor *self)
+ 
+   if (priv->unmapped_paint_branch_counter == 0)
+     {
++      /* Invariant that needs_finish_layout is set all the way up to the stage
++       * needs to be met.
++       */
++      if (priv->needs_finish_layout)
++        {
++          iter = priv->parent;
++          while (iter && !iter->priv->needs_finish_layout)
++            {
++              iter->priv->needs_finish_layout = TRUE;
++              iter = iter->priv->parent;
++            }
++        }
++
+       /* Avoid the early return in clutter_actor_queue_relayout() */
+       priv->needs_width_request = FALSE;
+       priv->needs_height_request = FALSE;
+@@ -2477,6 +2492,11 @@ absolute_geometry_changed (ClutterActor *actor)
+ {
+   actor->priv->needs_update_stage_views = TRUE;
+   actor->priv->needs_visible_paint_volume_update = TRUE;
++
++  actor->priv->needs_finish_layout = TRUE;
++  /* needs_finish_layout is already TRUE on the whole parent tree thanks
++   * to queue_update_paint_volume() that was called by transform_changed().
++   */
+ }
+ 
+ static ClutterActorTraverseVisitFlags
+@@ -7586,6 +7606,7 @@ clutter_actor_init (ClutterActor *self)
+   priv->needs_paint_volume_update = TRUE;
+   priv->needs_visible_paint_volume_update = TRUE;
+   priv->needs_update_stage_views = TRUE;
++  priv->needs_finish_layout = TRUE;
+ 
+   priv->cached_width_age = 1;
+   priv->cached_height_age = 1;
+@@ -15292,6 +15313,7 @@ clear_stage_views_cb (ClutterActor *actor,
+   g_autoptr (GList) old_stage_views = NULL;
+ 
+   actor->priv->needs_update_stage_views = TRUE;
++  actor->priv->needs_finish_layout = TRUE;
+ 
+   old_stage_views = g_steal_pointer (&actor->priv->stage_views);
+ 
+@@ -15521,6 +15543,9 @@ clutter_actor_finish_layout (ClutterActor *self,
+   ClutterActorPrivate *priv = self->priv;
+   ClutterActor *child;
+ 
++  if (!priv->needs_finish_layout)
++    return;
++
+   if ((!CLUTTER_ACTOR_IS_MAPPED (self) &&
+        !clutter_actor_has_mapped_clones (self)) ||
+       CLUTTER_ACTOR_IN_DESTRUCTION (self))
+@@ -15562,6 +15587,8 @@ clutter_actor_finish_layout (ClutterActor *self,
+       priv->needs_update_stage_views = FALSE;
+     }
+ 
++  priv->needs_finish_layout = FALSE;
++
+   for (child = priv->first_child; child; child = child->priv->next_sibling)
+     clutter_actor_finish_layout (child, use_max_scale);
+ }
+-- 
+GitLab
+
+
+From 0fd78ae501f30c5c2f001acf579819310929c2dd Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Tue, 18 Oct 2022 01:20:45 +0200
+Subject: [PATCH 12/13] clutter/actor: Use visible_paint_volume for updating
+ stage views list
+
+We have the visible_paint_volume around already and it is in
+eye-coordinates, so this saves a bit of resources otherwise used for
+matrix multiplications.
+
+Also it's more correct to figure out the stage views we're on by looking
+at the paint volume instead of the allocation, since that includes
+transforms like scale_x/y or transform_x/y.
+---
+ clutter/clutter/clutter-actor.c | 19 +++++++++++++------
+ 1 file changed, 13 insertions(+), 6 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 19c58ba361..66e7ecdf69 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -15477,26 +15477,33 @@ update_stage_views (ClutterActor *self)
+   ClutterActorPrivate *priv = self->priv;
+   g_autoptr (GList) old_stage_views = NULL;
+   ClutterStage *stage;
++  ClutterActorBox stage_paint_box;
+   graphene_rect_t bounding_rect;
+ 
+   old_stage_views = g_steal_pointer (&priv->stage_views);
+ 
+-  if (priv->needs_allocation)
++  if (!priv->visible_paint_volume_valid)
+     {
+-      g_warning ("Can't update stage views actor %s is on because it needs an "
+-                 "allocation.", _clutter_actor_get_debug_name (self));
++      g_warning ("Can't update stage views actor %s is on because "
++                 "!visible_paint_volume_valid.", _clutter_actor_get_debug_name (self));
+       goto out;
+     }
+ 
+   stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+   g_return_if_fail (stage);
+ 
+-  clutter_actor_get_transformed_extents (self, &bounding_rect);
++  _clutter_paint_volume_get_stage_paint_box (&priv->visible_paint_volume,
++                                             stage,
++                                             &stage_paint_box);
+ 
+-  if (bounding_rect.size.width == 0.0 ||
+-      bounding_rect.size.height == 0.0)
++  if (clutter_actor_box_get_area (&stage_paint_box) == 0.0)
+     goto out;
+ 
++  bounding_rect = GRAPHENE_RECT_INIT (stage_paint_box.x1,
++                                      stage_paint_box.y1,
++                                      stage_paint_box.x2 - stage_paint_box.x1,
++                                      stage_paint_box.y2 - stage_paint_box.y1);
++
+   priv->stage_views = clutter_stage_get_views_for_rect (stage,
+                                                         &bounding_rect);
+ 
+-- 
+GitLab
+
+
+From 0e4c29dbc93a126f695f32cafe7a9ac9eaccac47 Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Sun, 5 Jun 2022 16:59:15 +0200
+Subject: [PATCH 13/13] clutter/actor: Cache absolute modelview matrices
+
+While we're now doing a fairly good job at not needing those matrices
+all the time anymore, we still need it multiple times during every paint
+cycle, so it definitely makes sense to introduce some caching here.
+---
+ clutter/clutter/clutter-actor.c | 32 ++++++++++++++++++++++++++++++--
+ 1 file changed, 30 insertions(+), 2 deletions(-)
+
+diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
+index 66e7ecdf69..16db93aa44 100644
+--- a/clutter/clutter/clutter-actor.c
++++ b/clutter/clutter/clutter-actor.c
+@@ -689,6 +689,8 @@ struct _ClutterActorPrivate
+   /* the cached transformation matrix; see apply_transform() */
+   graphene_matrix_t transform;
+ 
++  graphene_matrix_t absolute_modelview;
++
+   float resource_scale;
+ 
+   guint8 opacity;
+@@ -847,6 +849,8 @@ struct _ClutterActorPrivate
+   guint needs_update_stage_views    : 1;
+   guint clear_stage_views_needs_stage_views_changed : 1;
+   guint needs_finish_layout : 1;
++  guint has_inverse_transform       : 1;
++  guint absolute_modelview_valid    : 1;
+ };
+ 
+ enum
+@@ -2492,6 +2496,7 @@ absolute_geometry_changed (ClutterActor *actor)
+ {
+   actor->priv->needs_update_stage_views = TRUE;
+   actor->priv->needs_visible_paint_volume_update = TRUE;
++  actor->priv->absolute_modelview_valid = FALSE;
+ 
+   actor->priv->needs_finish_layout = TRUE;
+   /* needs_finish_layout is already TRUE on the whole parent tree thanks
+@@ -2876,8 +2881,6 @@ clutter_actor_apply_transform_to_point (ClutterActor             *self,
+  * instead.
+  *
+  */
+-/* XXX: We should consider caching the stage relative modelview along with
+- * the actor itself */
+ static void
+ _clutter_actor_get_relative_transformation_matrix (ClutterActor      *self,
+                                                    ClutterActor      *ancestor,
+@@ -3117,6 +3120,30 @@ _clutter_actor_apply_relative_transformation_matrix (ClutterActor      *self,
+   if (self == ancestor)
+     return;
+ 
++  if (ancestor == NULL)
++    {
++      ClutterActorPrivate *priv = self->priv;
++
++      if (!priv->absolute_modelview_valid)
++        {
++          graphene_matrix_init_identity (&priv->absolute_modelview);
++
++          if (priv->parent != NULL)
++            {
++              _clutter_actor_apply_relative_transformation_matrix (priv->parent,
++                                                                   NULL,
++                                                                   &priv->absolute_modelview);
++            }
++
++          _clutter_actor_apply_modelview_transform (self, &priv->absolute_modelview);
++
++          priv->absolute_modelview_valid = TRUE;
++        }
++
++      graphene_matrix_multiply (&priv->absolute_modelview, matrix, matrix);
++      return;
++    }
++
+   if (self->priv->parent != NULL)
+     _clutter_actor_apply_relative_transformation_matrix (self->priv->parent,
+                                                          ancestor,
+@@ -7615,6 +7642,7 @@ clutter_actor_init (ClutterActor *self)
+   priv->enable_model_view_transform = TRUE;
+ 
+   priv->transform_valid = FALSE;
++  priv->absolute_modelview_valid = FALSE;
+ 
+   /* the default is to stretch the content, to match the
+    * current behaviour of basically all actors. also, it's
+-- 
+GitLab
+

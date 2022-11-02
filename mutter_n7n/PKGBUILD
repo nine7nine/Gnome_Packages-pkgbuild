@@ -8,34 +8,38 @@
 
 pkgbase=mutter_n7n
 pkgname=(mutter_n7n mutter_n7n-docs)
-pkgver=42.3
-pkgrel=1
+pkgver=43.0+r88+gc57a500cc
+pkgrel=3
 pkgdesc="A window manager for GNOME"
 url="https://gitlab.gnome.org/GNOME/mutter"
 arch=(x86_64)
 license=(GPL)
 depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
-         libcanberra startup-notification zenity libsm gnome-desktop 
-         libxkbcommon-x11 gnome-settings-daemon libgudev libinput pipewire
-         xorg-xwayland graphene libxkbfile libsysprof-capture)
+         libcanberra startup-notification libsm gnome-desktop libxkbcommon-x11
+         gnome-settings-daemon libgudev libinput pipewire xorg-xwayland graphene
+         libxkbfile libsysprof-capture lcms2 colord)
 makedepends=(gobject-introspection git egl-wayland meson xorg-server
              wayland-protocols sysprof gi-docgen)
-checkdepends=(xorg-server-xvfb wireplumber python-dbusmock)
-_commit=1903356b45c6c884a0451580f32494ff1288656d  # tags/42.3^0
+checkdepends=(xorg-server-xvfb wireplumber python-dbusmock zenity)
+_commit=c57a500ccbd16694e7cbb3408b1da5dc8efb44ba  # tags/43.0^88
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
-        'mutter-blur-rounded_42.patch'
-        'max-rounded.patch'
         'mutter-sched_fifo.patch'
         'mr1441.patch'
-        'mr1877.patch'
-        'mr2091.patch')
+        'mr1880.patch'
+        'mr2091.patch'        
+        'mr2679.patch'
+        'mutter-blur-rounded_43_x11.patch'
+        'max-rounded.patch'
+        'mutter-sched_fifo.patch')
 sha256sums=('SKIP'
-            '05232e60abda3b88691ff9066edd19fe65d984f5a5783023f7ac2e883b9113e6'
-            '0c83c468c68ae7fc7c5273688ff35f41cc1ac77dd6b4b1d7b6b77cbafbead43f'
             '51cf9a9d2c345d34df0bea7d1fa3f2e3257f0e3576a18ff2d4d8b38b64204159'
-            'c8e8e05f3b5ccf2faeeda45231bc12e4fff516c1e27f9d7a880a71eb00e5b0fa'
-            '5284e17ac5cc129ecd21a0726d8159d44abc2e0da5dbcf195f2f05aab8e06120'
-            '98e2e267e9519636d26173716168965fc1ecb7f791179e753573ad758c6b3849')
+            'f43eb4bfa647ed5889a73821c704434c18a8b3750f44f7353914400e798a9377'
+            '0a4dd1a4cae78085943f96e76f9e6d09aff55a71a8c484affb8e9a01c11e15b9'
+            '98e2e267e9519636d26173716168965fc1ecb7f791179e753573ad758c6b3849'
+            'f462806add3ed6fe58f8beea49ab4ee45d6781e391ed9d293d94a3217c5a2b83'
+            '1d48817fcc58c78e954a5458f28913fdabfd642b0190aa60164378ee667afefd'
+            '981b8316e6b8445f869aac52d8ad53d0cd7b7fbc488a6c66fe0f26f8276bcdc2'
+            '51cf9a9d2c345d34df0bea7d1fa3f2e3257f0e3576a18ff2d4d8b38b64204159')
 
 pkgver() {
   cd mutter
@@ -45,12 +49,13 @@ pkgver() {
 prepare() {
   cd mutter
 
-  patch -p1 < "$srcdir/mutter-blur-rounded_42.patch"
-  patch -p1 < "$srcdir/max-rounded.patch"   
   patch -p1 < "$srcdir/mr1441.patch"
-  patch -p1 < "$srcdir/mr1877.patch"
-  # patch -p1 < "$srcdir/mr2091.patch"
-  # patch -p1 < "$srcdir/mutter-sched_fifo.patch"
+  patch -p1 < "$srcdir/mr1880.patch"
+  patch -p1 < "$srcdir/mr2091.patch"
+  patch -p1 < "$srcdir/mr2679.patch"
+  patch -p1 < "$srcdir/mutter-blur-rounded_43_x11.patch"
+  patch -p1 < "$srcdir/max-rounded.patch"
+  patch -p1 < "$srcdir/mutter-sched_fifo.patch"
 }
 
 build() {
@@ -76,7 +81,7 @@ _pick() {
 }
 
 package_mutter_n7n() {
-  provides=(mutter libmutter-10.so)
+  provides=(mutter libmutter-11.so)
   conflicts=(mutter)
   groups=(gnome)
 
