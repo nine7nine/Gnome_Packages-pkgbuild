@@ -1,0 +1,95 @@
+From fc1b4ae14951713b3d8c5243d8ad125c1d69cdea Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 9 May 2022 13:17:00 +0200
+Subject: [PATCH 1/2] gesture-tracker: Only track actions which are actually
+ enabled
+
+Tracking disabled actions doesn't make sense, these will never recognize
+anyway.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2508>
+---
+ src/core/meta-gesture-tracker.c | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/src/core/meta-gesture-tracker.c b/src/core/meta-gesture-tracker.c
+index 33ee834e30..9e6d55d45c 100644
+--- a/src/core/meta-gesture-tracker.c
++++ b/src/core/meta-gesture-tracker.c
+@@ -370,7 +370,8 @@ meta_gesture_tracker_track_stage (MetaGestureTracker *tracker,
+     {
+       GestureActionData data;
+ 
+-      if (!CLUTTER_IS_GESTURE_ACTION (l->data))
++      if (!clutter_actor_meta_get_enabled (l->data) ||
++          !CLUTTER_IS_GESTURE_ACTION (l->data))
+         continue;
+ 
+       data.gesture = g_object_ref (l->data);
+-- 
+GitLab
+
+
+From 28982ade942b9aba50b8eff0d993f46e399971db Mon Sep 17 00:00:00 2001
+From: =?UTF-8?q?Jonas=20Dre=C3=9Fler?= <verdre@v0yd.nl>
+Date: Mon, 9 May 2022 13:17:46 +0200
+Subject: [PATCH 2/2] gesture-tracker: Never reject sequences in Wayland
+ sessions
+
+In constrast to x11, Wayland has sane handling for touch events and
+allows the compositor to handle a touch event while the clients are
+already seeing it. This means we don't need the REJECTED state on
+Wayland, since we can also grab sequences after the client has seen
+them.
+
+So disallow moving sequences to the REJECTED state on Wayland.
+
+Part-of: <https://gitlab.gnome.org/GNOME/mutter/-/merge_requests/2508>
+---
+ src/core/meta-gesture-tracker.c | 23 ++++++++++++++++++-----
+ 1 file changed, 18 insertions(+), 5 deletions(-)
+
+diff --git a/src/core/meta-gesture-tracker.c b/src/core/meta-gesture-tracker.c
+index 9e6d55d45c..2bb07c3ce1 100644
+--- a/src/core/meta-gesture-tracker.c
++++ b/src/core/meta-gesture-tracker.c
+@@ -227,6 +227,24 @@ static gboolean
+ state_is_applicable (MetaSequenceState prev_state,
+                      MetaSequenceState state)
+ {
++
++  if (meta_is_wayland_compositor ())
++    {
++      /* Never reject sequences on Wayland, on Wayland we deliver touch events
++       * to clients right away and can cancel them later when accepting a
++       * sequence.
++       */
++      if (state == META_SEQUENCE_REJECTED)
++        return FALSE;
++    }
++  else
++    {
++      /* Sequences must be accepted/denied before PENDING_END */
++      if (prev_state == META_SEQUENCE_NONE &&
++          state == META_SEQUENCE_PENDING_END)
++        return FALSE;
++    }
++
+   /* PENDING_END state is final */
+   if (prev_state == META_SEQUENCE_PENDING_END)
+     return FALSE;
+@@ -235,11 +253,6 @@ state_is_applicable (MetaSequenceState prev_state,
+   if (state == META_SEQUENCE_NONE)
+     return FALSE;
+ 
+-  /* Sequences must be accepted/denied before PENDING_END */
+-  if (prev_state == META_SEQUENCE_NONE &&
+-      state == META_SEQUENCE_PENDING_END)
+-    return FALSE;
+-
+   /* Make sequences stick to their accepted/denied state */
+   if (state != META_SEQUENCE_PENDING_END &&
+       prev_state != META_SEQUENCE_NONE)
+-- 
+GitLab
+

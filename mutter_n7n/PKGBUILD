@@ -9,7 +9,7 @@
 pkgbase=mutter_n7n
 pkgname=(mutter_n7n mutter_n7n-docs)
 pkgver=43.0+r88+gc57a500cc
-pkgrel=3
+pkgrel=5
 pkgdesc="A window manager for GNOME"
 url="https://gitlab.gnome.org/GNOME/mutter"
 arch=(x86_64)
@@ -26,8 +26,11 @@ source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
         'mutter-sched_fifo.patch'
         'mr1441.patch'
         'mr1880.patch'
-        'mr2091.patch'        
+        'mr2091.patch'
         'mr2679.patch'
+        'mr2687.patch'
+        'mr2644.patch'
+        'mr2508.patch'
         'mutter-blur-rounded_43_x11.patch'
         'max-rounded.patch'
         'mutter-sched_fifo.patch')
@@ -37,6 +40,9 @@ sha256sums=('SKIP'
             '0a4dd1a4cae78085943f96e76f9e6d09aff55a71a8c484affb8e9a01c11e15b9'
             '98e2e267e9519636d26173716168965fc1ecb7f791179e753573ad758c6b3849'
             'f462806add3ed6fe58f8beea49ab4ee45d6781e391ed9d293d94a3217c5a2b83'
+            '741ea2ae16973858c583605af529ece35147f3d5dcc1207e60c17bbeb4086611'
+            '1a0ec2641184c51b4425c8f6b77d48380051d86028f59811e4df8fb6049a9cb3'
+            '83421c3a72787591390eb8907d5a653d63f460db5a5118e5a8b9eabbd36019ce'
             '1d48817fcc58c78e954a5458f28913fdabfd642b0190aa60164378ee667afefd'
             '981b8316e6b8445f869aac52d8ad53d0cd7b7fbc488a6c66fe0f26f8276bcdc2'
             '51cf9a9d2c345d34df0bea7d1fa3f2e3257f0e3576a18ff2d4d8b38b64204159')
@@ -53,6 +59,9 @@ prepare() {
   patch -p1 < "$srcdir/mr1880.patch"
   patch -p1 < "$srcdir/mr2091.patch"
   patch -p1 < "$srcdir/mr2679.patch"
+  patch -p1 < "$srcdir/mr2687.patch"
+  patch -p1 < "$srcdir/mr2644.patch"
+  patch -p1 < "$srcdir/mr2508.patch"
   patch -p1 < "$srcdir/mutter-blur-rounded_43_x11.patch"
   patch -p1 < "$srcdir/max-rounded.patch"
   patch -p1 < "$srcdir/mutter-sched_fifo.patch"

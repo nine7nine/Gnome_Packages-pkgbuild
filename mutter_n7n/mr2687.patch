@@ -1,0 +1,36 @@
+From 3cd8b087ab57fd1d7054139e4f2ffd2e1c56ed25 Mon Sep 17 00:00:00 2001
+From: John Wudrick <prochronism@gmail.com>
+Date: Fri, 4 Nov 2022 02:35:12 +0000
+Subject: [PATCH] window: Update ongoing edge resistance flags with input
+
+Fix a recent regression where edge resistance flags where no
+longer updated during the move/resize operation.
+
+Closes: https://gitlab.gnome.org/GNOME/mutter/-/issues/2492
+---
+ src/core/window.c | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/src/core/window.c b/src/core/window.c
+index d376017166..3b35ee021e 100644
+--- a/src/core/window.c
++++ b/src/core/window.c
+@@ -6021,6 +6021,7 @@ queue_update_move (MetaWindow              *window,
+   MetaCompositor *compositor;
+   MetaLaters *laters;
+ 
++  window->display->grab_last_edge_resistance_flags = flags;
+   window->display->grab_latest_motion_x = x;
+   window->display->grab_latest_motion_y = y;
+ 
+@@ -6166,6 +6167,7 @@ queue_update_resize (MetaWindow              *window,
+   MetaCompositor *compositor;
+   MetaLaters *laters;
+ 
++  window->display->grab_last_edge_resistance_flags = flags;
+   window->display->grab_latest_motion_x = x;
+   window->display->grab_latest_motion_y = y;
+ 
+-- 
+GitLab
+
