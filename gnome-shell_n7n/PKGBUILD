@@ -5,7 +5,7 @@
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
 pkgver=43.0+r46+gecc3cf8ab
-pkgrel=1
+pkgrel=2
 epoch=1
 pkgdesc="Next generation desktop shell"
 url="https://wiki.gnome.org/Projects/GnomeShell"
@@ -29,9 +29,11 @@ conflicts=(gnome-shell)
 _commit=ecc3cf8ab108c4511e650f4d0f0124b9f98cd8bf  # tags/43.0^46
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
-        'no_Overview_left_Clock.patch')
+        "GS_transparency.patch"
+        "no_Overview_left_Clock.patch")
 sha256sums=('SKIP'
             'SKIP'
+            'e6b2e9ac542bd32b3ef241753dbfc6598db5697543009e932c7dfb2d1648650b'
             'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6')
 
 pkgver() {
@@ -47,6 +49,7 @@ prepare() {
   git -c protocol.file.allow=always submodule update
   
   patch -p1 < "$srcdir/no_Overview_left_Clock.patch"
+  patch -p1 < "$srcdir/GS_transparency.patch"
 }
 
 build() {

@@ -1,0 +1,34 @@
+--- a/data/theme/gnome-shell-sass/widgets/_popovers.scss	2022-11-05 09:58:11.501160604 -0500
++++ b/data/theme/gnome-shell-sass/widgets/_popovers.scss	2022-11-05 09:57:46.083457419 -0500
+@@ -22,7 +22,7 @@
+   border-radius: $modal_radius*1.25;
+   border: 1px solid $borders_edge;
+   box-shadow: 0 2px 4px 0 $shadow_color;
+-  background-color: $bg_color;
++  background-color: transparentize($bg_color, 0.2);
+ }
+ 
+ // menu items
+@@ -84,7 +84,7 @@
+ 
+ // popover submenus
+ .popup-sub-menu {
+-  background-color: $checked_bg_color;
++  background-color: transparentize($checked_bg_color, 0.16);
+   border-radius: 0 0 $base_border_radius $base_border_radius;
+ 
+   .popup-menu-ornament {
+
+--- a/data/theme/gnome-shell-sass/widgets/_keyboard.scss	2022-11-05 10:02:50.512339814 -0500
++++ b/data/theme/gnome-shell-sass/widgets/_keyboard.scss	2022-11-05 10:02:16.703938303 -0500
+@@ -10,7 +10,7 @@ $default_key_bg_color: if($variant=='lig
+ // draw keys using button function
+ #keyboard {
+   // background-color: transparentize(if($variant=='light', darken($bg_color, 5%), darken($bg_color, 8%)), 0.1);
+-  background-color: $osd_bg_color;
++  background-color: transparentize($osd_bg_color, 0.16);
+   box-shadow: inset 0 1px 0 0 $osd_outer_borders_color;
+ 
+   .page-indicator {
+
+
