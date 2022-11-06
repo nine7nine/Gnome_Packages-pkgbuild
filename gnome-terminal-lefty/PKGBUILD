@@ -4,15 +4,12 @@
 # Contributor: Fernando Fernandez <fernando@softwareperonista.com.ar>
 # Contributor: Jan de Groot <jgc@archlinux.org>
 # Contributor: Jan Alexander Steffens (heftig) <heftig@archlinux.org>
-# upstream patches:
-# https://src.fedoraproject.org/cgit/rpms/gnome-terminal.git
-# https://github.com/debarshiray/gnome-terminal
 
 pkgname=gnome-terminal-lefty
 _pkgname=gnome-terminal
-pkgver=3.44.0
+pkgver=3.46.4
 pkgrel=1
-pkgdesc="The GNOME Terminal Emulator with transparency + lefty scrollbar"
+pkgdesc="The GNOME Terminal Emulator with transparency && Southpaw Scrollbar"
 url="https://wiki.gnome.org/Apps/Terminal"
 arch=(x86_64)
 license=(GPL)
@@ -20,24 +17,32 @@ depends=(vte3 gsettings-desktop-schemas)
 makedepends=(docbook-xsl libnautilus-extension gnome-shell yelp-tools meson)
 provides=("$_pkgname=$pkgver")
 conflicts=("$_pkgname")
-groups=(gnome)
-changelog=package.changelog
 options=(debug)
-source=(https://download.gnome.org/sources/$_pkgname/${pkgver:0:4}/$_pkgname-$pkgver.tar.xz
+_commit=44d55c8626d609d61905ef5cf11f0af2d7b7acd4  # tags/3.46.4^0
+source=("git+https://gitlab.gnome.org/GNOME/gnome-terminal.git#commit=$_commit"
         transparency.patch
         gnome-terminal-lefty.patch)
-sha256sums=('aa967189eeb609459e6c0a468a01ea70cb8c4530da1d500b2d3f4fc438b8fe2a'
-            '095d356e0740a4e7a029175c75556bcf20f612cdda79a26d5885254d06f54e42'
+sha256sums=('SKIP'
+            '04743ff919d5fc9304e2e6c69297139864f68ec275ba323b90e53e48cb6c9257'
             '893113f9ac473901a4ff919a885db36a98076f65d6fc9a6c2657e6e06aabd88c')
 
+pkgver() {
+  cd gnome-terminal
+  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
+}
+
 prepare() {
-  cd $_pkgname-$pkgver
+  cd gnome-terminal
   patch -Np1 -i ../transparency.patch
   patch -Np1 -i ../gnome-terminal-lefty.patch
 }
 
 build() {
-  arch-meson $_pkgname-$pkgver build
+  local meson_options=(
+    -D b_lto=false
+  )
+
+  arch-meson gnome-terminal build "${meson_options[@]}"
   meson compile -C build
 }
 
