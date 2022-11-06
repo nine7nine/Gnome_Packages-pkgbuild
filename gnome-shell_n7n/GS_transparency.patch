@@ -31,4 +31,32 @@
  
    .page-indicator {
 
-
+--- a/data/theme/gnome-shell-sass/widgets/_panel.scss	2022-11-06 11:55:47.832578801 -0500
++++ b/data/theme/gnome-shell-sass/widgets/_panel.scss	2022-11-06 11:55:35.656543945 -0500
+@@ -7,7 +7,7 @@ $panel_height: 2.2em;
+ $panel_transition_duration: 250ms; // same as the overview transition duration
+ 
+ #panel {
+-  background-color: $panel_bg_color;
++  background-color: transparentize($panel_bg_color, 0.7);
+   font-weight: bold;
+   height: $panel_height;
+   @extend %numeric;
+@@ -23,7 +23,7 @@ $panel_transition_duration: 250ms; // sa
+   // panel menus
+   .panel-button {
+     font-weight: bold;
+-    color: $panel_fg_color;
++    color: transparentize($panel_fg_color, 0.2);
+     -natural-hpadding: $base_padding * 2;
+     -minimum-hpadding: $base_padding;
+     transition-duration: 150ms;
+@@ -32,7 +32,7 @@ $panel_transition_duration: 250ms; // sa
+ 
+     &.clock-display {
+       .clock {
+-        transition-duration: 150ms;
++        transition-duration: 50ms;
+         border: 3px solid transparent;
+         border-radius: 99px;
+       }

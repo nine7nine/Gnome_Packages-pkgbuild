@@ -5,7 +5,7 @@
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
 pkgver=43.0+r46+gecc3cf8ab
-pkgrel=2
+pkgrel=3
 epoch=1
 pkgdesc="Next generation desktop shell"
 url="https://wiki.gnome.org/Projects/GnomeShell"
@@ -33,7 +33,7 @@ source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "no_Overview_left_Clock.patch")
 sha256sums=('SKIP'
             'SKIP'
-            'e6b2e9ac542bd32b3ef241753dbfc6598db5697543009e932c7dfb2d1648650b'
+            '1d5e2776ed78c585c708ebe97e7b99e8682ad151bce6f0d03319804b0505beb9'
             'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6')
 
 pkgver() {
