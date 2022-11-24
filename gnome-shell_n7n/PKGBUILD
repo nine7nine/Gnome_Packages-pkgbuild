@@ -5,7 +5,7 @@
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
 pkgver=43.0+r46+gecc3cf8ab
-pkgrel=3
+pkgrel=4
 epoch=1
 pkgdesc="Next generation desktop shell"
 url="https://wiki.gnome.org/Projects/GnomeShell"
@@ -30,10 +30,12 @@ _commit=ecc3cf8ab108c4511e650f4d0f0124b9f98cd8bf  # tags/43.0^46
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
         "GS_transparency.patch"
+        "unlockDialog_remove_blur.patch"
         "no_Overview_left_Clock.patch")
 sha256sums=('SKIP'
             'SKIP'
-            '1d5e2776ed78c585c708ebe97e7b99e8682ad151bce6f0d03319804b0505beb9'
+            'eb8baf023efce79dc770c4a7fae403faff37bf20e08a14eb2f5a68811c3844cb'
+            'f3b92285a9655df1c3bb5f31f4b3c589b4f0592f4314b1d6108e9d095e22a23b'
             'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6')
 
 pkgver() {
@@ -50,6 +52,7 @@ prepare() {
   
   patch -p1 < "$srcdir/no_Overview_left_Clock.patch"
   patch -p1 < "$srcdir/GS_transparency.patch"
+  patch -p1 < "$srcdir/unlockDialog_remove_blur.patch"
 }
 
 build() {
