@@ -8,7 +8,7 @@
 pkgname=gnome-terminal-lefty
 _pkgname=gnome-terminal
 pkgver=3.46.4
-pkgrel=1
+pkgrel=2
 pkgdesc="The GNOME Terminal Emulator with transparency && Southpaw Scrollbar"
 url="https://wiki.gnome.org/Apps/Terminal"
 arch=(x86_64)
@@ -33,7 +33,7 @@ pkgver() {
 
 prepare() {
   cd gnome-terminal
-  patch -Np1 -i ../transparency.patch
+  # patch -Np1 -i ../transparency.patch
   patch -Np1 -i ../gnome-terminal-lefty.patch
 }
 
