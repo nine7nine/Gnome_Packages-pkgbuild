@@ -4,8 +4,8 @@
 
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
-pkgver=43.0+r46+gecc3cf8ab
-pkgrel=4
+pkgver=43.1+r4+ga2cd818c8
+pkgrel=1
 epoch=1
 pkgdesc="Next generation desktop shell"
 url="https://wiki.gnome.org/Projects/GnomeShell"
@@ -26,7 +26,7 @@ optdepends=('gnome-control-center: System settings'
 groups=(gnome)
 provides=(gnome-shell gnome-shell=$pkgver gnome-shell=$epoch:$pkgver)
 conflicts=(gnome-shell)
-_commit=ecc3cf8ab108c4511e650f4d0f0124b9f98cd8bf  # tags/43.0^46
+_commit=a2cd818c8c4d6a81d565099b01920b8815dea355  # tags/43.1^4
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
         "GS_transparency.patch"
