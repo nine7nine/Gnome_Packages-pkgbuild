@@ -1588,7 +1588,7 @@ index 9cee56a371..de5775768c 100644
 +    case META_WINDOW_NORMAL:
 +    case META_WINDOW_DIALOG:
 +    case META_WINDOW_MODAL_DIALOG:
-+    case META_WINDOW_SPLASHSCREEN:
++    // case META_WINDOW_SPLASHSCREEN:
 +      return TRUE;
 +    default:
 +      return FALSE;
