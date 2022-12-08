@@ -1,0 +1,105 @@
+From 7edc1bbb3bc0557211f952bb967566ed54d516c4 Mon Sep 17 00:00:00 2001
+From: Robert Mader <robert.mader@posteo.de>
+Date: Sat, 22 Oct 2022 04:38:35 +0200
+Subject: [PATCH 1/2] window-actor/x11: Disable direct scanout for windows with
+ shape or frame
+
+In both cases transparency is not archived by regular alpha blending,
+which would work with direct scanout as well, but by using mask textures
+in `MetaShapedTexture`. It can thus be considered "legacy blending",
+which not seem to be supported by display hardware.
+
+The frame case will become more common once we support direct scanout
+for non-fullscreen clients. Thus implement the check making as little
+assumptions as possible.
+---
+ src/compositor/meta-window-actor-x11.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/src/compositor/meta-window-actor-x11.c b/src/compositor/meta-window-actor-x11.c
+index 4f01a2c9bf..03c8c99aa3 100644
+--- a/src/compositor/meta-window-actor-x11.c
++++ b/src/compositor/meta-window-actor-x11.c
+@@ -433,6 +433,7 @@ static MetaSurfaceActor *
+ meta_window_actor_x11_get_scanout_candidate (MetaWindowActor *actor)
+ {
+   MetaSurfaceActor *surface_actor;
++  MetaWindow *window;
+ 
+   surface_actor = meta_window_actor_get_surface (actor);
+ 
+@@ -446,6 +447,23 @@ meta_window_actor_x11_get_scanout_candidate (MetaWindowActor *actor)
+   if (!meta_window_actor_is_opaque (actor))
+     return NULL;
+ 
++  window = meta_window_actor_get_meta_window (actor);
++  if (!window || window->shape_region)
++    return NULL;
++
++  if (window->frame)
++    {
++      MetaFrameBorders borders;
++
++      meta_frame_calc_borders (window->frame, &borders);
++
++      if (borders.total.left > 0 ||
++          borders.total.top > 0 ||
++          borders.total.right > 0 ||
++          borders.total.bottom > 0)
++        return NULL;
++    }
++
+   return surface_actor;
+ }
+ 
+-- 
+GitLab
+
+
+From 70e0bde45203130f61a63f457d57f1cd8a4ea53b Mon Sep 17 00:00:00 2001
+From: Robert Mader <robert.mader@posteo.de>
+Date: Tue, 25 Oct 2022 21:16:41 +0200
+Subject: [PATCH 2/2] feedback-actor: Disable direct scanout during lifetime
+
+Similar to how we handle certain shell elements. Implementations need to
+ensure no references to the object keep around longer that necessary.
+
+Arguably this should be replaced by a more robust and implicit actor
+hierachy detection in the direct scanout code at some point.
+
+Closes https://gitlab.gnome.org/GNOME/mutter/-/issues/2470
+---
+ src/compositor/meta-feedback-actor.c | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/compositor/meta-feedback-actor.c b/src/compositor/meta-feedback-actor.c
+index fcab89714a..7baba3a18e 100644
+--- a/src/compositor/meta-feedback-actor.c
++++ b/src/compositor/meta-feedback-actor.c
+@@ -59,6 +59,15 @@ meta_feedback_actor_constructed (GObject *object)
+   display = meta_get_display ();
+   feedback_group = meta_get_feedback_group_for_display (display);
+   clutter_actor_add_child (feedback_group, CLUTTER_ACTOR (object));
++  meta_disable_unredirect_for_display (display);
++}
++
++static void
++meta_feedback_actor_finalize (GObject *object)
++{
++  meta_enable_unredirect_for_display (meta_get_display ());
++
++  G_OBJECT_CLASS (meta_feedback_actor_parent_class)->finalize (object);
+ }
+ 
+ static void
+@@ -128,6 +137,7 @@ meta_feedback_actor_class_init (MetaFeedbackActorClass *klass)
+   GParamSpec *pspec;
+ 
+   object_class->constructed = meta_feedback_actor_constructed;
++  object_class->finalize = meta_feedback_actor_finalize;
+   object_class->set_property = meta_feedback_actor_set_property;
+   object_class->get_property = meta_feedback_actor_get_property;
+ 
+-- 
+GitLab
+

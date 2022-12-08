@@ -1281,27 +1281,28 @@ diff --git a/clutter/clutter/clutter-actor.c b/clutter/clutter/clutter-actor.c
 index 19c58ba361..66e7ecdf69 100644
 --- a/clutter/clutter/clutter-actor.c
 +++ b/clutter/clutter/clutter-actor.c
-@@ -15477,26 +15477,33 @@ update_stage_views (ClutterActor *self)
+@@ -15482,6 +15510,7 @@ update_stage_views (ClutterActor *self)
    ClutterActorPrivate *priv = self->priv;
    g_autoptr (GList) old_stage_views = NULL;
    ClutterStage *stage;
 +  ClutterActorBox stage_paint_box;
    graphene_rect_t bounding_rect;
  
+   stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
+@@ -15489,20 +15518,26 @@ update_stage_views (ClutterActor *self)
+ 
    old_stage_views = g_steal_pointer (&priv->stage_views);
  
 -  if (priv->needs_allocation)
-+  if (!priv->visible_paint_volume_valid)
++ if (!priv->visible_paint_volume_valid)
      {
 -      g_warning ("Can't update stage views actor %s is on because it needs an "
 -                 "allocation.", _clutter_actor_get_debug_name (self));
 +      g_warning ("Can't update stage views actor %s is on because "
 +                 "!visible_paint_volume_valid.", _clutter_actor_get_debug_name (self));
+       priv->stage_views = g_list_copy (clutter_stage_peek_stage_views (stage));
        goto out;
      }
- 
-   stage = CLUTTER_STAGE (_clutter_actor_get_stage_internal (self));
-   g_return_if_fail (stage);
  
 -  clutter_actor_get_transformed_extents (self, &bounding_rect);
 +  _clutter_paint_volume_get_stage_paint_box (&priv->visible_paint_volume,
