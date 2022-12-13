@@ -5,7 +5,8 @@
 ## Gnome-Shell_n7n: 
 
  - This package disables Overview Mode entirely.
- - It also adds the Performance-related MRs (merge requests) from gitlab.
+ - Disables blure in the Lockscreen / unlockDialog (to avoid conflict with Mutter-Rounded blur)
+ - Adds Performance-related MRs (merge requests) from gitlab.
  
 This build of GS simplies and gives a more conventional Desktop experience. However, due to GS's Overview Mode being 
 disabled; any related/dependent features will not work. For example, I replace the GS overview search function with Albert,
@@ -22,12 +23,13 @@ Mode and sometimes freezes. Additionally, Gnome is much faster without Overview 
 This build of mutter pulls in the performance and mutter-rounded patches. Later I will adjust the defaults to match 
 my own tastes / configuration.
 
-NOTE: as of Gnome-43, this mutter package only supports x11. full stop.
+NOTE: as of Gnome-43, this mutter package only supports x11. full stop. Wayland support is broken.
 
 ## Gnome-Terminal-Lefty:
 
- - This package adds transparency to the terminal
  - This package contains a patch to move the scrollbar to the left-side (for left-handed Stylus/Tablet users. 
+
+NOTE: Transparency patch is disabled. I use Mutter-Rounded to create transparency/blur for Gnome-Terminal (and other apps).
 
 no support provided, as these are for my own personal use.
 
