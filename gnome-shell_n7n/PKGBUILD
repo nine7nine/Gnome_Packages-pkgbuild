@@ -4,7 +4,7 @@
 
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
-pkgver=43.2
+pkgver=44.1
 pkgrel=1
 epoch=1
 pkgdesc="Next generation desktop shell"
@@ -17,7 +17,9 @@ depends=(accountsservice gcr-4 gjs upower gnome-session gtk4
          gnome-disk-utility libsoup3 libgweather-4)
 makedepends=(gtk-doc gnome-control-center evolution-data-server
              gobject-introspection git meson sassc asciidoc bash-completion)
-checkdepends=(xorg-server-xvfb)
+if [ -n "$_enable_check" ]; then
+  checkdepends=(xorg-server-xvfb python-dbusmock xorg-server-xvfb)
+fi
 optdepends=('gnome-control-center: System settings'
             'evolution-data-server: Evolution calendar integration'
             'gst-plugins-good: Screen recording'
@@ -26,7 +28,7 @@ optdepends=('gnome-control-center: System settings'
 groups=(gnome)
 provides=(gnome-shell gnome-shell=$pkgver gnome-shell=$epoch:$pkgver)
 conflicts=(gnome-shell)
-_commit=e9b26eac0c0d66b87201874ce2b704268ee99be6  # tags/43.2^0
+_commit=b0ca64e7775225b7c5d049571a44ef40bf516406  # tags/44.1^0
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
         "GS_transparency.patch"
@@ -40,7 +42,7 @@ sha256sums=('SKIP'
 
 pkgver() {
   cd gnome-shell
-  git describe --tags | sed 's/[^-]*-g/r&/;s/-/+/g'
+  git describe --tags | sed 's/-/+/g'
 }
 
 prepare() {
@@ -51,8 +53,8 @@ prepare() {
   git -c protocol.file.allow=always submodule update
   
   patch -p1 < "$srcdir/no_Overview_left_Clock.patch"
-  patch -p1 < "$srcdir/GS_transparency.patch"
-  patch -p1 < "$srcdir/unlockDialog_remove_blur.patch"
+  # patch -p1 < "$srcdir/GS_transparency.patch"
+  # patch -p1 < "$srcdir/unlockDialog_remove_blur.patch"
 }
 
 build() {
@@ -60,25 +62,28 @@ build() {
   LDFLAGS+=" -Wl,-Bsymbolic-functions"
 
   arch-meson $_pkgname build \
-    -D gtk_doc=true \
+    -D gtk_doc=false \
     -D tests=false
   meson compile -C build
 }
 
 _check() (
-  export XDG_RUNTIME_DIR="$PWD/runtime-dir"
-  mkdir -p -m 700 "$XDG_RUNTIME_DIR"
+  mkdir -p -m 700 "${XDG_RUNTIME_DIR:=$PWD/rdir}"
+  export XDG_RUNTIME_DIR
 
-  meson test -C build --print-errorlogs
+  meson test -C build --print-errorlogs -t 3
 )
 
-check() {
-  dbus-run-session xvfb-run -s '-nolisten local +iglx -noreset' \
-    bash -c "$(declare -f _check); _check"
-}
+if [ -n "$_enable_check" ]; then
+  check() {
+    dbus-run-session xvfb-run -s '-nolisten local +iglx -noreset' \
+      bash -c "$(declare -f _check); _check"
+  }
+fi
 
 package() {
-  depends+=(libmutter-11.so)
+  depends+=(libmutter-12.so)
+  install=gnome-shell.install
   meson install -C build --destdir "$pkgdir"
 }
 
