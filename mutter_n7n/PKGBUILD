@@ -12,7 +12,7 @@ pkgver=44.1+r2+g82bd40dcb
 pkgrel=1
 pkgdesc="A window manager for GNOME"
 url="https://gitlab.gnome.org/GNOME/mutter"
-arch=(x86_64)
+arch=(x86_64 aarch64)
 license=(GPL)
 depends=(dconf gobject-introspection-runtime gsettings-desktop-schemas
          libcanberra startup-notification libsm gnome-desktop-4 libxkbcommon-x11
@@ -23,9 +23,13 @@ makedepends=(gobject-introspection git egl-wayland meson xorg-server
 _commit=82bd40dcbcc3601da755678778f033bd9a30286d  # tags/44.1^2
 source=("git+https://gitlab.gnome.org/GNOME/mutter.git#commit=$_commit"
         'mr1441.patch'
+        'mr2269.patch'
+        'mr2941.patch'
         'prio.patch')
 sha256sums=('SKIP'
             '3621acfed945773de4e107d4b077d8ff2b31eb4adc52d956ee6cc6bb245bac04'
+            'b963fe9d6cf7eeed66b5909735dd930355b759feb25b99eab14c007351595fbf'
+            '395072af4b44baa2831031fb3c85ef1fa999f6de66ab5c09082432c369e37b2d'
             'cca15ee32b5b4d942960672ab37403b2ccf5d249711fc321b333c3936d9ab897')
 
 pkgver() {
@@ -38,6 +42,8 @@ prepare() {
 
   patch -p1 < "$srcdir/mr1441.patch"
   patch -p1 < "$srcdir/prio.patch"
+  patch -p1 < "$srcdir/mr2269.patch"
+  patch -p1 < "$srcdir/mr2941.patch"
 
 }
 
