@@ -4,40 +4,73 @@
 
 pkgname=gnome-shell_n7n
 _pkgname=gnome-shell
-pkgver=44.1
+pkgver=44.2
 pkgrel=1
 epoch=1
 pkgdesc="Next generation desktop shell"
 url="https://wiki.gnome.org/Projects/GnomeShell"
 arch=(x86_64)
 license=(GPL)
-depends=(accountsservice gcr-4 gjs upower gnome-session gtk4
-         gnome-settings-daemon gsettings-desktop-schemas libcanberra-pulse
-         libgdm libsecret mutter libnma unzip libibus gnome-autoar
-         gnome-disk-utility libsoup3 libgweather-4)
-makedepends=(gtk-doc gnome-control-center evolution-data-server
-             gobject-introspection git meson sassc asciidoc bash-completion)
+depends=(
+  accountsservice
+  gcr-4
+  gjs
+  gnome-autoar
+  gnome-session
+  gnome-settings-daemon
+  gsettings-desktop-schemas
+  gtk4
+  libadwaita
+  libcanberra-pulse
+  libgdm
+  libgweather-4
+  libibus
+  libnma-gtk4
+  libsecret
+  libsoup3
+  mutter
+  unzip
+  upower
+)
+makedepends=(
+  asciidoc
+  bash-completion
+  evolution-data-server
+  git
+  gnome-control-center
+  gobject-introspection
+  gtk-doc
+  meson
+  sassc
+)
 if [ -n "$_enable_check" ]; then
-  checkdepends=(xorg-server-xvfb python-dbusmock xorg-server-xvfb)
+  checkdepends=(
+    appstream-glib
+    python-dbusmock
+    xorg-server-xvfb
+  )
 fi
-optdepends=('gnome-control-center: System settings'
-            'evolution-data-server: Evolution calendar integration'
-            'gst-plugins-good: Screen recording'
-            'gst-plugin-pipewire: Screen recording'
-            'gnome-bluetooth-3.0: Bluetooth support')
+optdepends=(
+  'evolution-data-server: Evolution calendar integration'
+  'gnome-bluetooth-3.0: Bluetooth support'
+  'gnome-control-center: System settings'
+  'gnome-disk-utility: Mount with keyfiles'
+  'gst-plugin-pipewire: Screen recording'
+  'gst-plugins-good: Screen recording'
+  'power-profiles-daemon: Power profile switching'
+  'switcheroo-control: Multi-GPU support'
+)
 groups=(gnome)
 provides=(gnome-shell gnome-shell=$pkgver gnome-shell=$epoch:$pkgver)
 conflicts=(gnome-shell)
-_commit=b0ca64e7775225b7c5d049571a44ef40bf516406  # tags/44.1^0
+_commit=071a47ba27d7117f56fd965ad2a9675d1ab823f6 # tags/44.2^0
 source=("git+https://gitlab.gnome.org/GNOME/gnome-shell.git#commit=$_commit"
         "git+https://gitlab.gnome.org/GNOME/libgnome-volume-control.git"
         "GS_transparency.patch"
-        "unlockDialog_remove_blur.patch"
         "no_Overview_left_Clock.patch")
 sha256sums=('SKIP'
             'SKIP'
-            'eb8baf023efce79dc770c4a7fae403faff37bf20e08a14eb2f5a68811c3844cb'
-            'f3b92285a9655df1c3bb5f31f4b3c589b4f0592f4314b1d6108e9d095e22a23b'
+            '408386b4bab0d9012f8a9d38d6e498e9374377f74033871b00d88765c578926f'
             'e57a0a1a6c91461e4b998da01d8458247990a8c0c919b9ad54d79375472ab3e6')
 
 pkgver() {
@@ -53,8 +86,7 @@ prepare() {
   git -c protocol.file.allow=always submodule update
   
   patch -p1 < "$srcdir/no_Overview_left_Clock.patch"
-  # patch -p1 < "$srcdir/GS_transparency.patch"
-  # patch -p1 < "$srcdir/unlockDialog_remove_blur.patch"
+  patch -p1 < "$srcdir/GS_transparency.patch"
 }
 
 build() {
@@ -86,4 +118,3 @@ package() {
   install=gnome-shell.install
   meson install -C build --destdir "$pkgdir"
 }
-

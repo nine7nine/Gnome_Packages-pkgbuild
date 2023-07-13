@@ -390,16 +390,6 @@ index 80a3dbc0f622a5767036302f324e0b75e69c391b..8ab86dd87bf44e19b6677db147d03538
    XDeleteProperty (x11_display->xdisplay,
                     window->xwindow,
                     x11_display->atom__MUTTER_NEEDS_FRAME);
-@@ -246,6 +418,9 @@ meta_window_destroy_frame (MetaWindow *window)
-   g_free (frame);
- 
-   /* Put our state back where it should be */
-+  if (!window->unmanaging)
-+    meta_compositor_sync_updates_frozen (window->display->compositor, window);
-+
-   meta_window_queue (window, META_QUEUE_CALC_SHOWING);
-   meta_window_queue (window, META_QUEUE_MOVE_RESIZE);
- }
 @@ -361,26 +536,51 @@ meta_frame_clear_cached_borders (MetaFrame *frame)
  
  gboolean
@@ -1101,15 +1091,6 @@ index 90d07cb5ecd1fd786386c3c26a894eccf0a7de6e..5b965e72e86221a808e6d740d9c5ee16
                                window->unmaps_pending);
                  }
              }
-@@ -1533,7 +1531,7 @@ handle_other_xevent (MetaX11Display *x11_display,
-            * that case.
-            */
-         }
--      else if (frame_was_receiver)
-+      else if (frame_was_receiver || wrapper_was_receiver)
-         {
-           break;
-         }
 @@ -1608,7 +1606,7 @@ handle_other_xevent (MetaX11Display *x11_display,
                              xwcm, &xwc);
            meta_x11_error_trap_pop (x11_display);
